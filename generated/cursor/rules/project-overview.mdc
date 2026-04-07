@@ -24,7 +24,7 @@ rocMLIR is an MLIR-based convolution, GEMM, attention, and fused kernel generato
 - `rocmlir-gen` -- generate Rock dialect kernels and driver code to run/validate kernel output
 - `rocmlir-driver` -- lower and run kernels through pipelines (`-c` for default full pipeline)
 - `rocmlir-opt` -- MLIR optimizer with Rock passes
-- `rocmlir-tuning-driver` -- JIT benchmark kernels
+- `rocmlir-tuning-driver` -- tune kernels by sweeping perf configs and selecting the best
 
 ## Build
 
