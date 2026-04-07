@@ -36,7 +36,7 @@ rocMLIR is an MLIR-based convolution, GEMM, attention, and fused kernel generato
 ```
 cmake -G Ninja .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++
-ninja check-rocmlir
+ninja check-rocmlir  # builds everything and runs all tests
 ```
 
 ## Commit messages
