@@ -1,0 +1,33 @@
+<!-- applyTo: mlir/utils/jenkins/Jenkinsfile*,.azuredevops/*,.github/workflows/* -->
+
+# CI Pipelines
+
+rocMLIR uses three CI systems.
+
+## Jenkins (primary, GPU-heavy)
+
+- Config: `mlir/utils/jenkins/Jenkinsfile` (Groovy)
+- Variants: `Jenkinsfile.downstream`, `Jenkinsfile.release` (keep in sync)
+- Docker: `rocm/mlir:rocm7.2-latest`, Ninja, ROCm clang, `RelWithDebInfo`
+- PR: premerge clang-format/tidy, selected tuning, optional E2E
+- Nightly: full benchmark + regression reports + hipBLASLt comparison
+- Weekly: exhaustive MITuna tuning + parameter sweeps + perfDB archival
+- Upstream merges: set `ignoreExternalLinting=true` to skip linting `external/`
+
+## Azure Pipelines (ROCm ecosystem)
+
+- Config: `.azuredevops/rocm-ci.yml`
+- Triggers: push to `develop`/`mainline`, PRs to `develop`
+- Excludes: `.github/`, `*.md`
+- Uses shared templates from `ROCm/ROCm` repo
+
+## GitHub Actions (lightweight)
+
+- Config: `.github/workflows/ci.yml`
+- Triggers: PRs and push to `develop` and `release/**`
+- Jobs: flake8 + yapf on changed `mlir/**/*.py`, pytest for perf scripts
+- Codecov: `.github/workflows/codecov-report.yml` (biweekly, not blocking)
+
+## CODEOWNERS
+
+All paths: `@causten` (`.github/CODEOWNERS`)

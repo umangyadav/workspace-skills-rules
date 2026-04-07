@@ -1,0 +1,60 @@
+---
+description: LLVM/MLIR C++ coding standards: casting, ADT types, error handling, naming, includes, namespaces.
+globs: mlir/**/*.cpp,mlir/**/*.h
+alwaysApply: false
+---
+
+# LLVM/MLIR C++ Standards
+
+## Formatting and naming
+
+- Style: `BasedOnStyle: LLVM`, `AlwaysBreakTemplateDeclarations: Yes`
+- Classes/Enums: `CamelCase`; Functions/Members/Params/Vars: `camelBack`
+
+## Casting -- never use `dynamic_cast`
+
+```cpp
+// GOOD
+if (isa<MemRefType>(val.getType())) { auto t = cast<MemRefType>(val.getType()); }
+auto t = dyn_cast<MemRefType>(val.getType()); // returns nullptr on failure
+
+// BAD
+auto t = dynamic_cast<MemRefType*>(ptr); // never use C++ RTTI
+```
+
+## ADT types -- prefer LLVM over STL
+
+- `llvm::SmallVector<T, N>` over `std::vector`
+- `llvm::StringRef` over `const std::string&`
+- `llvm::ArrayRef<T>` over `const std::vector<T>&`
+- Algorithms: `llvm::find`, `llvm::all_of`, `llvm::to_vector`, `llvm::zip_equal`
+
+## Error handling -- never use exceptions
+
+```cpp
+// Return LogicalResult from helpers/verifiers/rewrites
+LogicalResult verify() { return emitOpError("mismatch") << " expected " << n; }
+
+// In pass runOnOperation()
+if (failed(result)) { signalPassFailure(); return; }
+```
+
+## Debug support
+
+```cpp
+#define DEBUG_TYPE "rock-my-pass"
+LLVM_DEBUG(llvm::dbgs() << "message\n");
+```
+
+## Include order
+
+1. Primary/dialect headers (`mlir/Dialect/Rock/...`)
+2. Other MLIR headers (`mlir/IR/...`, `mlir/Support/...`)
+3. LLVM headers (`llvm/ADT/...`, `llvm/Support/...`)
+4. Standard library (`<algorithm>`, `<cstdint>`)
+
+## Namespaces
+
+- `using namespace mlir;` and `using namespace mlir::rock;` at file scope
+- Anonymous namespace for local structs: `namespace { struct MyPass ... }`
+- Pass defs: `namespace mlir { namespace rock { #define GEN_PASS_DEF_... } }`

@@ -1,0 +1,45 @@
+# Testing Conventions
+
+## When to use each test type
+
+| Type | Location | Use for |
+|------|----------|---------|
+| **Lit** (`.mlir`) | `mlir/test/` | Passes, pipelines, driver integration |
+| **GoogleTest** | `mlir/unittests/` | C++ helpers, attributes, transform maps |
+| **pytest** | `mlir/utils/performance/tests/` | Performance script logic (no GPU) |
+| **E2E** | `mlir/test/e2e/`, `mlir/test/fusion/pr-e2e/` | Full GPU pipeline |
+
+## Lit test patterns
+
+```mlir
+// Round-trip
+// RUN: rocmlir-opt %s | FileCheck %s
+// RUN: rocmlir-opt %s | rocmlir-opt | FileCheck %s
+
+// Pass pipeline
+// RUN: rocmlir-opt --my-pass %s | FileCheck %s
+
+// Arch substitution
+// RUN: sed s/##TOKEN_ARCH##/%arch/g %s | rocmlir-opt --my-pass | FileCheck %s
+
+// Split input + diagnostics
+// RUN: rocmlir-opt --my-pass -split-input-file --verify-diagnostics %s | FileCheck %s
+
+// GPU-required
+// REQUIRES: rocm-runner
+```
+
+## Key substitutions
+
+`%arch`, `%features`, `%pv`, `%random_data`, `%rocmlir_gen_flags`, `%shlibext`, `%linalg_test_lib_dir`, `%conv_validation_wrapper_library_dir`
+
+## FileCheck defaults
+
+`FILECHECK_OPTS="-enable-var-scope --allow-unused-prefixes=false"` -- all CHECK prefixes must be used.
+
+## Test targets
+
+- `check-rocmlir` -- full suite
+- `check-rocmlir-build-only` -- compile only
+- `RocMLIRUnitTests` -- GoogleTest only
+- E2E: enable with `-DROCK_E2E_TEST_ENABLED=ON`
