@@ -5,7 +5,7 @@ rocMLIR is an MLIR-based convolution, GEMM, attention, and fused kernel generato
 ## Key facts
 
 - Primary consumer: [MIGraphX](https://github.com/ROCm/AMDMIGraphX) via `libRockCompiler` fat library
-- Part of the [ROCm](https://github.com/ROCm) ecosystem alongside [rocm-libraries](https://github.com/ROCm/rocm-libraries)
+- Part of the [ROCm](https://github.com/ROCm) ecosystem (separate repo, not part of [rocm-libraries](https://github.com/ROCm/rocm-libraries))
 - License: Apache 2.0 with LLVM Exceptions
 
 ## Source layout
