@@ -35,6 +35,7 @@ ninja check-rocmlir  # builds everything and runs all tests
 - Plain: `Fix/Add/Update description (#PR)`
 - Non-functional: `[NFC] Description`
 - External: `[EXTERNAL] Description`
+- Release backport: `[BACKPORT] Description (#PR)` (cherry-picks to release branches)
 
 ## Confidentiality
 
