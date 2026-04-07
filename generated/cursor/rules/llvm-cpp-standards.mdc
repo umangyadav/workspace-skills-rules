@@ -1,6 +1,6 @@
 ---
-description: LLVM/MLIR C++ coding standards: casting, ADT types, error handling, naming, includes, namespaces.
-globs: mlir/**/*.cpp,mlir/**/*.h
+description: "LLVM/MLIR C++ coding standards: casting, ADT types, error handling, naming, includes, namespaces."
+globs: "mlir/**/*.cpp,mlir/**/*.h"
 alwaysApply: false
 ---
 

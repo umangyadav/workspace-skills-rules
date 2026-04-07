@@ -1,6 +1,6 @@
 ---
-description: Python coding standards enforced by CI: yapf formatting, flake8 linting, pytest.
-globs: mlir/**/*.py
+description: "Python coding standards enforced by CI: yapf formatting, flake8 linting, pytest."
+globs: "mlir/**/*.py"
 alwaysApply: false
 ---
 

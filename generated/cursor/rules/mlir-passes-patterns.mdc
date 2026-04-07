@@ -1,6 +1,6 @@
 ---
-description: MLIR pass definition and pattern rewriting conventions for rocMLIR.
-globs: mlir/lib/**/*.cpp
+description: "MLIR pass definition and pattern rewriting conventions for rocMLIR."
+globs: "mlir/lib/**/*.cpp"
 alwaysApply: false
 ---
 

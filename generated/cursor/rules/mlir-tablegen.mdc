@@ -1,6 +1,6 @@
 ---
-description: MLIR TableGen conventions for dialect, op, attribute, and pass definitions.
-globs: mlir/**/*.td
+description: "MLIR TableGen conventions for dialect, op, attribute, and pass definitions."
+globs: "mlir/**/*.td"
 alwaysApply: false
 ---
 

@@ -1,6 +1,6 @@
 ---
-description: CLI reference for rocmlir-gen, rocmlir-driver, rocmlir-opt, rocmlir-tuning-driver.
-globs: mlir/tools/**/*.cpp
+description: "CLI reference for rocmlir-gen, rocmlir-driver, rocmlir-opt, rocmlir-tuning-driver."
+globs: "mlir/tools/**/*.cpp"
 alwaysApply: false
 ---
 

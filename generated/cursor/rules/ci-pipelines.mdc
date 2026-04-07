@@ -1,6 +1,6 @@
 ---
-description: CI conventions for Jenkins, Azure Pipelines, and GitHub Actions.
-globs: mlir/utils/jenkins/Jenkinsfile*,.azuredevops/*,.github/workflows/*
+description: "CI conventions for Jenkins, Azure Pipelines, and GitHub Actions."
+globs: "mlir/utils/jenkins/Jenkinsfile*,.azuredevops/*,.github/workflows/*"
 alwaysApply: false
 ---
 

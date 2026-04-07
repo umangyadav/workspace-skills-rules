@@ -1,5 +1,5 @@
 ---
-description: Code review checklist with severity levels, license headers, confidentiality, and temp file rules.
+description: "Code review checklist with severity levels, license headers, confidentiality, and temp file rules."
 alwaysApply: true
 ---
 

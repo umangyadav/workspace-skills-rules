@@ -54,11 +54,13 @@ def generate_cursor(metadata):
         content = load_rule_content(name)
 
         frontmatter_lines = ["---"]
-        frontmatter_lines.append(f'description: {rule["description"]}')
+        desc = rule["description"]
+        frontmatter_lines.append(f'description: "{desc}"')
         if rule.get("alwaysApply"):
             frontmatter_lines.append("alwaysApply: true")
         elif rule.get("globs"):
-            frontmatter_lines.append(f'globs: {rule["globs"]}')
+            globs = rule["globs"]
+            frontmatter_lines.append(f'globs: "{globs}"')
             frontmatter_lines.append("alwaysApply: false")
         frontmatter_lines.append("---")
 

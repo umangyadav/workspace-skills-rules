@@ -1,6 +1,6 @@
 ---
-description: CMake build system patterns and custom rocMLIR functions.
-globs: **/CMakeLists.txt,**/*.cmake
+description: "CMake build system patterns and custom rocMLIR functions."
+globs: "**/CMakeLists.txt,**/*.cmake"
 alwaysApply: false
 ---
 

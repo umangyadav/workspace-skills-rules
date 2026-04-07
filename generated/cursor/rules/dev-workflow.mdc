@@ -1,6 +1,6 @@
 ---
-description: Step-by-step guides for adding ops, passes, conversions, and debugging.
-globs: mlir/**/*.cpp,mlir/**/*.h,mlir/**/*.td
+description: "Step-by-step guides for adding ops, passes, conversions, and debugging."
+globs: "mlir/**/*.cpp,mlir/**/*.h,mlir/**/*.td"
 alwaysApply: false
 ---
 

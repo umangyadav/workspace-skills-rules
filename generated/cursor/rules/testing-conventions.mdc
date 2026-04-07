@@ -1,6 +1,6 @@
 ---
-description: Testing patterns: Lit tests, GoogleTest, E2E tests, FileCheck, substitutions.
-globs: mlir/test/**/*
+description: "Testing patterns: Lit tests, GoogleTest, E2E tests, FileCheck, substitutions."
+globs: "mlir/test/**/*"
 alwaysApply: false
 ---
 
