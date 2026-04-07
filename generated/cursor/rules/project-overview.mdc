@@ -16,8 +16,8 @@ rocMLIR is an MLIR-based convolution, GEMM, attention, and fused kernel generato
 ## Source layout
 
 - `mlir/` -- all rocMLIR sources (edit here)
-- `external/llvm-project/` -- vendored LLVM/MLIR (do not modify directly)
-- `external/mlir-hal/` -- vendored MHAL dependency (do not modify directly)
+- `external/llvm-project/` -- vendored LLVM/MLIR (rarely needs changes; use `[EXTERNAL]` commit prefix when modifying)
+- `external/mlir-hal/` -- vendored MHAL dependency (rarely needs changes; use `[EXTERNAL]` commit prefix when modifying)
 
 ## Tools
 
