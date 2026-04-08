@@ -50,6 +50,10 @@ Breaking changes to Rock dialect IR or C API require coordination with MIGraphX.
 
 # Code Review Checklist
 
+## Pre-commit formatting
+
+Before every commit, run `git clang-format --diff origin/develop` (or the appropriate base branch) and fix any issues. If the diff is non-empty, apply fixes and include them in the commit. This prevents CI failures from the premerge clang-format check.
+
 ## Premerge CI gates
 
 - **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed)

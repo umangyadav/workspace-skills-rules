@@ -149,6 +149,10 @@ Consult these files directly for the latest configuration before writing or fixi
 
 # Code Review Checklist
 
+## Pre-commit formatting
+
+Before every commit, run `git clang-format --diff origin/develop` (or the appropriate base branch) and fix any issues. If the diff is non-empty, apply fixes and include them in the commit. This prevents CI failures from the premerge clang-format check.
+
 ## Premerge CI gates
 
 - **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed)
