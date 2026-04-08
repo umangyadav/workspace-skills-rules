@@ -554,6 +554,27 @@ All paths: `@causten` (`.github/CODEOWNERS`)
 
 ---
 
+# Skill Dispatch
+
+Before starting any task, check whether an available skill matches the user's request. Skills are located in `.cursor/skills/*/SKILL.md`. Read the matching skill file and follow its process before doing anything else.
+
+## Trigger keywords → skill mapping
+
+| If the request mentions...                              | Use skill            |
+|---------------------------------------------------------|----------------------|
+| review PR, PR feedback, analyze PR                      | `pr-review`          |
+| build, compile, test, lint, check build                 | `build-test-workflow` |
+| profile, benchmark perf, kernel bottleneck              | `kernel-profiling`   |
+| run benchmarks, perfRunner, performance comparison      | `perfrunner-usage`   |
+| tune, tuning, perfConfig, tuningRunner                  | `tuningrunner-usage` |
+| release branch, cherry-pick, release patch              | `release-management` |
+| merge LLVM, upstream merge, subtree pull                | `upstream-llvm-merge`|
+
+If a skill matches, read its `SKILL.md` and follow the documented process step by step. Do not improvise a workflow when a skill already defines one.
+
+
+---
+
 # Workspace Hygiene
 
 ## Never commit temp or generated files
@@ -975,11 +996,28 @@ After modifying `perfRunner.py` source, rebuild with `ninja ci-performance-scrip
 
 ### 1. Fetch PR info
 
+Fetch the PR branch so you can read files at their actual line numbers (needed for `file:line` references later):
+
 ```bash
+git fetch origin pull/<number>/head:pr-<number>
+```
+
+Then gather PR metadata and diff. Prefer `gh` if available; fall back to the GitHub REST API with `curl` if not:
+
+```bash
+# Option A: gh CLI
 gh pr view <number> --json title,body,author,baseRefName,headRefName,files,statusCheckRollup
 gh pr diff <number>
 gh pr checks <number>
+
+# Option B: curl fallback (if gh is not installed)
+curl -s "https://api.github.com/repos/ROCm/rocMLIR/pulls/<number>"
+curl -s "https://api.github.com/repos/ROCm/rocMLIR/pulls/<number>/files"
+curl -s "https://api.github.com/repos/ROCm/rocMLIR/commits/<HEAD_SHA>/check-runs"
+curl -s "https://api.github.com/repos/ROCm/rocMLIR/commits/<HEAD_SHA>/status"
 ```
+
+Use `git show pr-<number>:<filepath>` to read files at their PR-branch state with correct line numbers.
 
 ### 2. Check CI status
 
@@ -991,11 +1029,11 @@ Flag any failing checks:
 ### 3. Review changed files
 
 Read all changed files. Apply checklists from:
-- `rules/code-review.md` -- coding standards, LLVM conventions, review severity levels
-- `rules/llvm-cpp-standards.md` -- rocMLIR-specific C++ patterns and idioms
-- `rules/cmake-conventions.md` -- CMake functions, options, and build conventions
-- `rules/testing-conventions.md` -- Lit test patterns, E2E `.toml` workflow, fusion test requirements
-- `rules/dev-workflow.md` -- testing requirements for new ops/features (arch, dtype, edge cases)
+- `rules/code-review.mdc` -- coding standards, LLVM conventions, review severity levels
+- `rules/llvm-cpp-standards.mdc` -- rocMLIR-specific C++ patterns and idioms
+- `rules/cmake-conventions.mdc` -- CMake functions, options, and build conventions
+- `rules/testing-conventions.mdc` -- Lit test patterns, E2E `.toml` workflow, fusion test requirements
+- `rules/dev-workflow.mdc` -- testing requirements for new ops/features (arch, dtype, edge cases)
 
 **Critical**: unreleased HW references, exceptions, RTTI, `#include <iostream>`, `using namespace std`, static ctors, committed temp files, breaking IR changes
 **Major**: naming, verifiers, tests, error handling, memory safety, license headers, external commits separated, CMake updates
@@ -1007,7 +1045,7 @@ Read all changed files. Apply checklists from:
 - License headers on new files (SPDX `Apache-2.0 WITH LLVM-exception`)
 - `librockcompiler_deps.cmake` updated if deps change
 - Downstream MIGraphX impact for IR/API changes
-- Release branch PRs: also apply release patch checklist (see `skills/release-management/SKILL.md`) (see `skills/release-management/SKILL.md`)
+- Release branch PRs: also apply release patch checklist (see `skills/release-management/SKILL.md`)
 
 ### 5. Report
 
