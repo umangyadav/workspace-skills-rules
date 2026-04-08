@@ -2,7 +2,3 @@ rules:
   - name: workspace-hygiene
     description: "Workspace hygiene: keep temp files, profiling output, and plan files out of version control."
     alwaysApply: true
-
-  - name: skill-dispatch
-    description: "Check available skills before starting a task and follow the matching skill's process."
-    alwaysApply: true

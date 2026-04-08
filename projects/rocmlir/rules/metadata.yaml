@@ -34,3 +34,7 @@ rules:
   - name: ci-pipelines
     description: "CI conventions for Jenkins, Azure Pipelines, and GitHub Actions."
     globs: "mlir/utils/jenkins/Jenkinsfile*,.azuredevops/*,.github/workflows/*"
+
+  - name: skill-dispatch
+    description: "Check available skills before starting a task and follow the matching skill's process."
+    alwaysApply: true
