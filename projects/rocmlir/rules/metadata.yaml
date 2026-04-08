@@ -1,0 +1,36 @@
+rules:
+  - name: project-overview
+    description: "rocMLIR project overview, architecture, confidentiality, and downstream awareness. Essential context for every conversation."
+    alwaysApply: true
+
+  - name: llvm-cpp-standards
+    description: "LLVM/MLIR C++ coding standards: casting, ADT types, error handling, naming, includes, namespaces."
+    globs: "mlir/**/*.cpp,mlir/**/*.h"
+
+  - name: cmake-conventions
+    description: "CMake build system patterns and custom rocMLIR functions."
+    globs: "**/CMakeLists.txt,**/*.cmake"
+
+  - name: python-standards
+    description: "Python coding standards enforced by CI: yapf formatting, flake8 linting, pytest."
+    globs: "mlir/**/*.py"
+
+  - name: code-review
+    description: "Code review checklist with severity levels, license headers, confidentiality, and temp file rules."
+    alwaysApply: true
+
+  - name: testing-conventions
+    description: "Testing patterns: Lit tests, GoogleTest, E2E tests, FileCheck, substitutions."
+    globs: "mlir/test/**/*"
+
+  - name: rocmlir-tools
+    description: "CLI reference for rocmlir-gen, rocmlir-driver, rocmlir-opt, rocmlir-tuning-driver."
+    globs: "mlir/tools/**/*.cpp"
+
+  - name: dev-workflow
+    description: "Step-by-step guides for adding ops, passes, conversions, and debugging."
+    globs: "mlir/**/*.cpp,mlir/**/*.h,mlir/**/*.td"
+
+  - name: ci-pipelines
+    description: "CI conventions for Jenkins, Azure Pipelines, and GitHub Actions."
+    globs: "mlir/utils/jenkins/Jenkinsfile*,.azuredevops/*,.github/workflows/*"

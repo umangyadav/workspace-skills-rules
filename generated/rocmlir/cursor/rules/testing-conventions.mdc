@@ -1,0 +1,80 @@
+---
+description: "Testing patterns: Lit tests, GoogleTest, E2E tests, FileCheck, substitutions."
+globs: "mlir/test/**/*"
+alwaysApply: false
+---
+
+# Testing Conventions
+
+See also: `code-review.md` (Major section) and `dev-workflow.md` (Testing a new operation or feature) for review-time testing requirements.
+
+## When to use each test type
+
+| Type | Location | Use for |
+|------|----------|---------|
+| **Lit** (`.mlir`) | `mlir/test/` | Passes, pipelines, driver integration |
+| **GoogleTest** | `mlir/unittests/` | C++ helpers, attributes, transform maps |
+| **pytest** | `mlir/utils/performance/tests/` | Performance script logic (no GPU) |
+| **E2E** | `mlir/test/e2e/`, `mlir/test/fusion/pr-e2e/` | Full GPU pipeline |
+
+## Lit test patterns
+
+```mlir
+// Pass test (most common)
+// RUN: rocmlir-opt --my-pass %s | FileCheck %s
+
+// Split input + diagnostics (for verifier/negative tests)
+// RUN: rocmlir-opt --my-pass -split-input-file -verify-diagnostics %s | FileCheck %s
+
+// rocmlir-gen → rocmlir-opt (test generated IR)
+// RUN: rocmlir-gen --arch gfx942 --operation gemm -t f16 -m 1024 -k 768 -n 512 | rocmlir-opt | FileCheck %s
+
+// Arch substitution for arch-dependent IR in test file
+// RUN: sed s/##TOKEN_ARCH##/%arch/g %s | rocmlir-driver --arch %arch --kernel-pipeline=migraphx,highlevel - | FileCheck %s
+
+// Pipeline dump verification
+// RUN: rocmlir-driver -dump-pipelines -kernel-pipeline=gpu -arch=gfx90a /dev/null -o /dev/null 2>&1 | FileCheck %s
+
+// E2E: rocmlir-gen → rocmlir-driver → mlir-runner (GPU required)
+// RUN: rocmlir-gen --arch %arch --operation gemm -pv | rocmlir-driver -c | mlir-runner --shared-libs=... | FileCheck %s
+
+// Fusion E2E: clone-harness → lowering → verification → xmir-runner
+// RUN: rocmlir-gen -fut <func> --arch %arch --clone-harness %s | \
+//   rocmlir-driver -kernel-pipeline=migraphx,highlevel -host-pipeline=migraphx,highlevel | \
+//   rocmlir-gen -ph -rand 1 -rand_type float -fut <func>_wrapper --verifier clone - | \
+//   rocmlir-driver -host-pipeline mhal -kernel-pipeline full | \
+//   xmir-runner --shared-libs=... --entry-point-result=void | FileCheck %s
+
+```
+
+## Key substitutions
+
+Defined in `lit.cfg.py` / `lit.site.cfg.py.in` files:
+- `mlir/test/lit.cfg.py` -- main substitutions (`%arch`, `%shlibext`, `%linalg_test_lib_dir`, etc.)
+- `mlir/test/e2e/lit.cfg.py` -- E2E-specific substitutions
+- `mlir/test/fusion/e2e/lit.cfg.py` -- fusion E2E substitutions
+
+## FileCheck defaults
+
+`FILECHECK_OPTS="-enable-var-scope --allow-unused-prefixes=false"` -- all CHECK prefixes must be used.
+
+## Test targets
+
+- `check-rocmlir` -- full suite
+- `check-rocmlir-build-only` -- compile only
+- `RocMLIRUnitTests` -- GoogleTest only
+- E2E (PR subset): enable with `-DROCMLIR_DRIVER_PR_E2E_TEST_ENABLED=ON`
+- E2E (full): enable with `-DROCK_E2E_TEST_ENABLED=ON`
+
+## Fusion test requirements
+
+MIGraphX-related or fusion changes must include fusion tests in `mlir/test/fusion/` (compile-level) and/or `mlir/test/fusion/pr-e2e/` (GPU E2E).
+
+## Adding E2E tests with `.toml` files
+
+1. Create or edit a `.toml` config in `mlir/test/e2e/` (e.g. `PrMyFeature.toml`)
+2. Register the config name in `mlir/test/e2e/CMakeLists.txt` under the appropriate `list(APPEND CONFIGS ...)` block:
+   - PR tests (`ROCMLIR_DRIVER_PR_E2E_TEST_ENABLED`) -- keep a small representative subset with short runtime to catch regressions quickly
+   - Full/nightly tests (`ROCK_E2E_TEST_ENABLED`) -- add extensive coverage here (large configs, more dtypes, edge cases)
+3. Optionally add a `.cfg` file (e.g. `PrMyFeature.cfg`) to apply arch or feature guards
+4. Tests are auto-generated from `.toml` by `generateE2ETest.py` at build time

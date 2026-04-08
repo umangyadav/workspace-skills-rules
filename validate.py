@@ -8,8 +8,13 @@ Checks:
   - Generated .mdc: valid YAML frontmatter with required fields
   - All files end with newline
   - No trailing whitespace
+
+Usage:
+    python3 validate.py --project rocmlir    # validate one project
+    python3 validate.py                      # validate all projects
 """
 
+import argparse
 import os
 import re
 import sys
@@ -18,6 +23,9 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).parent
+PROJECTS_DIR = ROOT / "projects"
+SHARED_DIR = ROOT / "shared"
+GEN_DIR = ROOT / "generated"
 ERRORS = []
 WARNINGS = []
 
@@ -158,15 +166,28 @@ def validate_mdc(mdc_file):
         warn(f"{mdc_file.name}: no globs or alwaysApply set")
 
 
-def validate_metadata():
-    print(f"\n--- Metadata: rules/metadata.yaml ---")
-    with open(ROOT / "rules" / "metadata.yaml") as f:
+def validate_metadata(rules_dir):
+    meta_path = rules_dir / "metadata.yaml"
+    print(f"\n--- Metadata: {meta_path.relative_to(ROOT)} ---")
+    with open(meta_path) as f:
         meta = yaml.safe_load(f)
 
-    rule_names = {r["name"] for r in meta["rules"]}
-    rule_files = {f.stem for f in (ROOT / "rules").glob("*.md")}
+    shared_meta_path = SHARED_DIR / "rules" / "metadata.yaml"
+    if shared_meta_path.exists():
+        with open(shared_meta_path) as f:
+            shared_meta = yaml.safe_load(f)
+        if shared_meta and "rules" in shared_meta:
+            project_names = {r["name"] for r in meta["rules"]}
+            for rule in shared_meta["rules"]:
+                if rule["name"] not in project_names:
+                    meta["rules"].append(rule)
 
-    missing_files = rule_names - rule_files
+    rule_names = {r["name"] for r in meta["rules"]}
+    rule_files = {f.stem for f in rules_dir.glob("*.md")}
+    shared_rule_files = {f.stem for f in (SHARED_DIR / "rules").glob("*.md")} if (SHARED_DIR / "rules").exists() else set()
+    all_rule_files = rule_files | shared_rule_files
+
+    missing_files = rule_names - all_rule_files
     extra_files = rule_files - rule_names
 
     if missing_files:
@@ -183,63 +204,113 @@ def validate_metadata():
     ok(f"{len(meta['rules'])} rules defined in metadata")
 
 
-def validate_generated():
+def validate_generated(project, gen_out):
     print(f"\n--- Generated output completeness ---")
-    cursor_rules = list((ROOT / "generated/cursor/rules").glob("*.mdc"))
-    cursor_skills = list((ROOT / "generated/cursor/skills").iterdir())
-    ok(f"cursor: {len(cursor_rules)} rules, {len(cursor_skills)} skills")
 
-    claude_md = ROOT / "generated/claude/CLAUDE.md"
+    cursor_rules_dir = gen_out / "cursor" / "rules"
+    cursor_skills_dir = gen_out / "cursor" / "skills"
+    if cursor_rules_dir.exists():
+        cursor_rules = list(cursor_rules_dir.glob("*.mdc"))
+        cursor_skills = list(cursor_skills_dir.iterdir()) if cursor_skills_dir.exists() else []
+        ok(f"cursor: {len(cursor_rules)} rules, {len(cursor_skills)} skills")
+    else:
+        error("cursor: missing generated rules")
+
+    claude_md = gen_out / "claude" / "CLAUDE.md"
     if claude_md.exists():
         ok(f"claude: CLAUDE.md ({claude_md.stat().st_size} bytes)")
     else:
         error("claude: missing CLAUDE.md")
 
-    copilot_main = ROOT / "generated/copilot/.github/copilot-instructions.md"
-    copilot_instr = list((ROOT / "generated/copilot/.github/instructions").glob("*.md"))
+    copilot_main = gen_out / "copilot" / ".github" / "copilot-instructions.md"
+    copilot_instr_dir = gen_out / "copilot" / ".github" / "instructions"
     if copilot_main.exists():
+        copilot_instr = list(copilot_instr_dir.glob("*.md")) if copilot_instr_dir.exists() else []
         ok(f"copilot: copilot-instructions.md + {len(copilot_instr)} instruction files")
     else:
         error("copilot: missing copilot-instructions.md")
 
-    agents = ROOT / "generated/generic/AGENTS.md"
-    windsurf = ROOT / "generated/generic/.windsurfrules"
+    agents = gen_out / "generic" / "AGENTS.md"
+    windsurf = gen_out / "generic" / ".windsurfrules"
     if agents.exists() and windsurf.exists():
         ok(f"generic: AGENTS.md + .windsurfrules")
     else:
         error("generic: missing output files")
 
 
-def main():
+def validate_project(project):
+    project_dir = PROJECTS_DIR / project
+    rules_dir = project_dir / "rules"
+    skills_dir = project_dir / "skills"
+    gen_out = GEN_DIR / project
+
     print("=" * 60)
-    print("Validating rocMLIR rules and skills")
+    print(f"Validating project: {project}")
     print("=" * 60)
 
-    validate_metadata()
+    validate_metadata(rules_dir)
 
     print("\n" + "=" * 60)
     print("RULE SOURCE FILES")
     print("=" * 60)
-    for rule_file in sorted((ROOT / "rules").glob("*.md")):
+    for rule_file in sorted(rules_dir.glob("*.md")):
         validate_rule_source(rule_file)
+
+    shared_rules_dir = SHARED_DIR / "rules"
+    if shared_rules_dir.exists():
+        for rule_file in sorted(shared_rules_dir.glob("*.md")):
+            validate_rule_source(rule_file)
 
     print("\n" + "=" * 60)
     print("SKILLS")
     print("=" * 60)
-    for skill_dir in sorted((ROOT / "skills").iterdir()):
+    for skill_dir in sorted(skills_dir.iterdir()):
         if skill_dir.is_dir():
             validate_skill(skill_dir)
 
-    print("\n" + "=" * 60)
-    print("GENERATED CURSOR .mdc FILES")
-    print("=" * 60)
-    for mdc_file in sorted((ROOT / "generated/cursor/rules").glob("*.mdc")):
-        validate_mdc(mdc_file)
+    shared_skills = SHARED_DIR / "skills"
+    if shared_skills.exists():
+        for skill_dir in sorted(shared_skills.iterdir()):
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                validate_skill(skill_dir)
 
-    print("\n" + "=" * 60)
-    print("GENERATED OUTPUT COMPLETENESS")
-    print("=" * 60)
-    validate_generated()
+    if gen_out.exists():
+        print("\n" + "=" * 60)
+        print("GENERATED CURSOR .mdc FILES")
+        print("=" * 60)
+        mdc_dir = gen_out / "cursor" / "rules"
+        if mdc_dir.exists():
+            for mdc_file in sorted(mdc_dir.glob("*.mdc")):
+                validate_mdc(mdc_file)
+
+        print("\n" + "=" * 60)
+        print("GENERATED OUTPUT COMPLETENESS")
+        print("=" * 60)
+        validate_generated(project, gen_out)
+
+
+def list_projects():
+    if not PROJECTS_DIR.exists():
+        return []
+    return sorted(d.name for d in PROJECTS_DIR.iterdir()
+                  if d.is_dir() and (d / "rules" / "metadata.yaml").exists())
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--project", type=str,
+                        help="Validate a specific project (default: all projects)")
+    args = parser.parse_args()
+
+    projects = [args.project] if args.project else list_projects()
+
+    if not projects:
+        print("No projects found in projects/")
+        return 1
+
+    for project in projects:
+        validate_project(project)
 
     print("\n" + "=" * 60)
     print(f"SUMMARY: {len(ERRORS)} errors, {len(WARNINGS)} warnings")

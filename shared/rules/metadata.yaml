@@ -1,0 +1,4 @@
+rules:
+  - name: workspace-hygiene
+    description: "Workspace hygiene: keep temp files, profiling output, and plan files out of version control."
+    alwaysApply: true

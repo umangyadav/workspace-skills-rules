@@ -1,66 +1,94 @@
-# rocMLIR AI Coding Rules and Skills
+# AI Coding Rules and Skills
 
-Portable rules and skills for AI-assisted development on [rocMLIR](https://github.com/ROCm/rocMLIR) -- an MLIR-based kernel generator for AMD GPUs.
+Portable rules and skills for AI-assisted development, organized by project.
 
 ## Structure
 
-- `rules/` -- 11 rules (plain `.md`, source of truth) with `metadata.yaml` for tool-specific config
-- `skills/` -- 9 skills (`SKILL.md` per directory) for on-demand procedural workflows
-- `generate.py` -- generates tool-specific output into `generated/`
+```
+projects/
+  <project>/
+    rules/          # project-specific rules (.md) + metadata.yaml
+    skills/         # project-specific skills (SKILL.md per directory)
+shared/
+  rules/            # rules shared across projects
+  skills/           # skills shared across projects
+generated/
+  <project>/
+    cursor/         # .mdc rules + skills
+    claude/         # CLAUDE.md + .claude/
+    copilot/        # .github/ instructions
+    generic/        # AGENTS.md + .windsurfrules
+generate.py         # generates tool-specific output
+validate.py         # validates rules and skills
+```
 
 ## Quick start
 
 ```bash
-# Generate all tool formats
+# Generate all projects, all targets
 python3 generate.py
 
-# Generate for a specific tool
-python3 generate.py --target cursor
-python3 generate.py --target claude
-python3 generate.py --target copilot
-python3 generate.py --target generic
+# Generate for a specific project
+python3 generate.py --project rocmlir
+
+# Generate a specific project + target
+python3 generate.py --project rocmlir --target cursor
+
+# Validate
+python3 validate.py --project rocmlir
 ```
 
 ## Import into your tool
 
-**Cursor**: copy `generated/cursor/rules/` and `generated/cursor/skills/` to `.cursor/` in your project.
+**Cursor**:
 
-**Claude Code**: copy `generated/claude/CLAUDE.md` and `generated/claude/.claude/` to your project root.
+Option 1 -- Symlink (recommended for local dev):
+```bash
+cd <your-project>
+mkdir -p .cursor
+ln -s <path-to-this-repo>/generated/<project>/cursor/rules .cursor/rules
+ln -s <path-to-this-repo>/generated/<project>/cursor/skills .cursor/skills
+```
 
-**GitHub Copilot**: copy `generated/copilot/.github/` to your project root.
+Option 2 -- Copy files:
+```bash
+cp -r <path-to-this-repo>/generated/<project>/cursor/rules/ .cursor/rules/
+cp -r <path-to-this-repo>/generated/<project>/cursor/skills/ .cursor/skills/
+```
 
-**Windsurf / Generic**: copy `generated/generic/AGENTS.md` to your project root.
+Option 3 -- Git submodule in your project:
+```bash
+git submodule add <this-repo-url> .cursor/ai-rules
+ln -s ai-rules/generated/<project>/cursor/rules .cursor/rules
+ln -s ai-rules/generated/<project>/cursor/skills .cursor/skills
+```
 
-## Rules (auto-applied)
+Option 4 -- Remote rules via GitHub (experimental):
+In Cursor Settings > Rules, add the GitHub repo URL under "Remote Rules". Cursor clones the rules into `~/.cursor/projects/{project}/rules/`. See [Cursor docs](https://cursor.com/docs/context/rules#remote-rules-via-github). Note: this feature currently has a [known issue](https://forum.cursor.com/t/remote-rules-via-github/148949) where imported rules may not activate. Use Options 1-3 until this is resolved.
 
-| Rule | Scope | Purpose |
-|------|-------|---------|
-| project-overview | always | Project context, confidentiality, downstream awareness |
-| llvm-cpp-standards | C++ files | LLVM casting, ADT, error handling, naming, includes |
-| mlir-passes-patterns | C++ impl | Pass definition, pattern rewriting, conversion targets |
-| mlir-tablegen | .td files | Dialect, op, attribute, pass TableGen conventions |
-| cmake-conventions | CMake files | Build system helpers and custom functions |
-| python-standards | Python files | yapf, flake8, pytest standards |
-| code-review | always | Review checklist, license, confidentiality, temp files |
-| testing-conventions | test files | Lit, GoogleTest, E2E patterns and substitutions |
-| rocmlir-tools | tool sources | rocmlir-gen/driver/opt/tuning-driver CLI reference |
-| dev-workflow | C++/TD files | Step-by-step guides for adding ops, passes, conversions |
-| ci-pipelines | CI configs | Jenkins, Azure Pipelines, GitHub Actions conventions |
+**Claude Code**: copy `generated/<project>/claude/CLAUDE.md` and `generated/<project>/claude/.claude/` to your project root.
 
-## Skills (on-demand)
+**GitHub Copilot**: copy `generated/<project>/copilot/.github/` to your project root.
 
-| Skill | Trigger | Purpose |
-|-------|---------|---------|
-| pr-review | "Review PR #1234" | Structured PR review with CI checks |
-| self-review | "Review my changes" | Pre-PR self-review with checklist |
-| build-test-workflow | "Build and test" | Build, test, lint with structured report |
-| upstream-llvm-merge | "Merge upstream LLVM" | Git subtree merge workflow |
-| release-management | "Manage release branch" | Release branch and patch workflow |
-| perfrunner-usage | "Run benchmarks" | perfRunner.py usage guide |
-| tuningrunner-usage | "Tune kernels" | tuningRunner.py usage guide |
-| perf-reports-utils | "Generate reports" | Report script usage guide |
-| kernel-profiling | "Profile kernel" | rocprofv3 and rocprof-compute workflow |
+**Windsurf / Generic**: copy `generated/<project>/generic/AGENTS.md` to your project root.
+
+## Adding a new project
+
+1. Create `projects/<project-name>/rules/` and `projects/<project-name>/skills/`
+2. Add a `metadata.yaml` in the rules directory defining rules and their scopes
+3. Add rule `.md` files and skill directories
+4. Run `python3 generate.py --project <project-name>`
+5. Run `python3 validate.py --project <project-name>`
+
+## Current projects
+
+### rocmlir
+
+[rocMLIR](https://github.com/ROCm/rocMLIR) -- an MLIR-based kernel generator for AMD GPUs.
+
+- 9 rules, 7 skills
+- See `projects/rocmlir/` for details
 
 ## License
 
-Apache 2.0 with LLVM Exceptions (same as rocMLIR).
+MIT
