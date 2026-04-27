@@ -195,4 +195,3 @@ Verify these are excluded:
 - `plans/`, `scratch/`, `notes/`
 - `*.profraw`, `*.profdata`, `att_dump/`, `*.pftrace`
 - Editor files: `.vscode/`, `.idea/`, `*.sw?`, `*~`
-

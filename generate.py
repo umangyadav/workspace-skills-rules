@@ -134,7 +134,8 @@ def generate_claude(metadata, dirs, gen_out):
         first_line = body.split("\n")[0] if body else skill_name
         sections.append(f"- **{skill_name}**: {first_line}")
 
-    (out / "CLAUDE.md").write_text("\n\n---\n\n".join(sections) + "\n")
+    (out / "CLAUDE.md").write_text(
+        "\n\n---\n\n".join(sections).rstrip("\n") + "\n")
 
     settings = {"permissions": {"allow": ["Read", "Write", "Shell"]}}
     (claude_dir / "settings.json").write_text(
@@ -162,14 +163,15 @@ def generate_copilot(metadata, dirs, gen_out):
             always_sections.append(load_rule_content(rule["name"], dirs))
 
     (gh_dir / "copilot-instructions.md").write_text(
-        "\n\n---\n\n".join(always_sections) + "\n")
+        "\n\n---\n\n".join(always_sections).rstrip("\n") + "\n")
 
     for rule in metadata["rules"]:
         if rule.get("globs") and not rule.get("alwaysApply"):
             content = load_rule_content(rule["name"], dirs)
             fname = rule["name"].replace("-", "_") + ".instructions.md"
             header = f"<!-- applyTo: {rule['globs']} -->\n\n"
-            (instr_dir / fname).write_text(header + content)
+            (instr_dir / fname).write_text(
+                (header + content).rstrip("\n") + "\n")
 
     print(f"  copilot: {gh_dir} (copilot-instructions.md + "
           f"{len(list(instr_dir.iterdir()))} instruction files)")
@@ -192,7 +194,7 @@ def generate_generic(metadata, dirs, gen_out):
         body = skill_content.split("---", 2)[-1].strip() if "---" in skill_content else skill_content
         sections.append(body)
 
-    full = "\n\n---\n\n".join(sections) + "\n"
+    full = "\n\n---\n\n".join(sections).rstrip("\n") + "\n"
     (out / "AGENTS.md").write_text(full)
     (out / ".windsurfrules").write_text(full)
 
