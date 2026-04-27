@@ -712,15 +712,10 @@ Files in `mlir/utils/jenkins/`:
 | `Jenkinsfile.downstream` | **Deprecated.** Used to drive a public-CI mirror. Public CI is no longer used; the file is kept in-tree for history but is not run. The "ALSO CHANGE Jenkinsfile.downstream" comment at the top of `Jenkinsfile` is stale -- ignore it. |
 | `Jenkinsfile.release` | Release-build storage only (`Set System Property` + `Store a Release Build`); ~50 lines. |
 
-PR pipeline (`Jenkinsfile`) is a **matrix** with axis `CODEPATH` over `vanilla, mfma, navi21, navi3x, navi4x, gfx950`. Per matrix row (each in a Docker container, ROCm clang from `/opt/rocm/llvm/bin`):
+The PR pipeline is a `CODEPATH` matrix (`vanilla, mfma, navi21, navi3x, navi4x, gfx950`) running each row in a ROCm Docker container. The exact stage list lives in `mlir/utils/jenkins/Jenkinsfile` -- read it there rather than mirroring it here. Two things worth knowing without opening the file:
 
-1. SCM checkout (with `robustScmCheckout` deep-clone fallback for "reference is not a tree")
-2. Prepare Docker environment (image is ROCm-based; pulled via `dockerImage()`)
-3. **Configure and build rocmlirTriton** -- `bash cmake.sh` (`RelWithDebInfo`, `BUILD_FAT_LIBROCKCOMPILER=ON`)
-4. **Static checks** -- `python3 mlir/utils/jenkins/static-checks/premerge-checks.py --base-commit=origin/${TARGET}`. **Only runs on the `mfma` codepath** (`if (params.nightly == false) && (codepath == "mfma")`). Honors `params.ignoreExternalLinting` to skip the `external/` tree.
-5. **Run tests** -- `bash tests.sh` (the in-tree smoke suite)
-
-Nightly / weekly stages exist in the file but are commented out: shared-library random E2E, MIGraphX integration, `tuna-script.sh` tuning of selected GEMM/conv configs, static-lib package build, weekly parameter sweeps, weekly fusion tuning, perfDB archival, plot generation. Re-enabling any of those is a private-CI-only change today -- do **not** propagate it to `Jenkinsfile.downstream`.
+- Static checks (clang-format / clang-tidy via `mlir/utils/jenkins/static-checks/premerge-checks.py`) are gated on the `mfma` codepath only.
+- Nightly / weekly stages exist but are commented out, and re-enabling them is a private-CI-only change -- do **not** propagate it to `Jenkinsfile.downstream`.
 
 ## Azure Pipelines (ROCm ecosystem)
 
