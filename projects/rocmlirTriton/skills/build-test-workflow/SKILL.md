@@ -37,28 +37,7 @@ The canonical entry point is `cmake.sh`, which:
 bash cmake.sh
 ```
 
-### Manual configure (when you need to change options)
-
-```bash
-mkdir -p build && cd build
-cmake -G Ninja .. \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_C_COMPILER=clang-20 \
-  -DCMAKE_CXX_COMPILER=clang++-20 \
-  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DBUILD_FAT_LIBROCKCOMPILER=ON \
-  -DLLD_BUILD_TOOLS=ON \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DROCK_E2E_TEST_ENABLED=ON \
-  -DROCMLIR_DRIVER_PR_E2E_TEST_ENABLED=ON \
-  -DROCMLIR_DRIVER_E2E_TEST_ENABLED=ON
-ninja libconv-validation-wrappers.so
-ninja check-rocmlir-build-only ci-performance-scripts
-```
-
-To configure against a pre-built MLIR (e.g. shared dev environment), pass `-DMLIR_DIR=/path/to/lib/cmake/mlir` and skip `scripts/build-llvm.sh`.
+To configure against a pre-built MLIR (e.g. a shared dev environment), pass `-DMLIR_DIR=/path/to/lib/cmake/mlir` and skip `scripts/build-llvm.sh`. For one-off configure changes, edit `cmake.sh` rather than reproducing the long `cmake -G Ninja ...` line by hand -- the cmake options it sets (compiler/linker, E2E flags, build type) are the canonical set. The full option list is documented in `cmake-conventions.md`.
 
 Always verify exit codes. If the build fails, stop and report -- do not proceed to test/lint.
 
@@ -80,13 +59,13 @@ cd build && LIT_FILTER=fusion/pr-e2e/ ninja check-rocmlir
 cd build && LIT_FILTER=rocmlir-tuning-driver ninja check-rocmlir
 ```
 
-`tests.sh` auto-detects `$ARCH` and `$NUM_CU` from `rocminfo` and gates `gfx950`-only scaled GEMM cases.
+`tests.sh` auto-detects `$ARCH` and `$NUM_CU` from `rocminfo` and gates `gfx950`-only scaled GEMM cases. See `testing-conventions.md` for the lit suite layout and `tests.sh` smoke contents.
 
 ## Step 3: Lint
 
 - **C++ format**: `git clang-format --diff origin/develop`
-- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge invokes `mlir/utils/jenkins/static-checks/premerge-checks.py` (clang-format + clang-tidy, **only on the `mfma` matrix row**)
-- **Python lint/format**: `flake8 --ignore=E501,E251,E124,W605,W504,E131,E126,W503,E123` + `yapf --diff` on changed `mlir/**/*.py` (see `.github/workflows/ci.yml`); no pytest gate exists yet
+- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge invokes `mlir/utils/jenkins/static-checks/premerge-checks.py` (clang-format + clang-tidy, **only on the `mfma` matrix row** -- see `ci-pipelines.md`)
+- **Python lint/format**: see `python-standards.md` for the canonical commands and ignore list
 
 ## Step 4: Report
 

@@ -8,6 +8,22 @@ alwaysApply: false
 
 rocmlirTriton depends on upstream [Triton](https://github.com/triton-lang/triton) as a git submodule. Triton brings its own LLVM/MLIR and AMD backend; we replicate parts of Triton's Python pipeline in C++.
 
+## Compilation arc
+
+```
+TOSA / MIGraphX
+    -> highlevel  (Linalg + Rock view-to-transform, fold-broadcast, ...)
+    -> Rock dialect (rock.gemm/conv/attention -> rock.gridwise -> rock.blockwise -> ptr arith)
+    -> RockToTTIRPass + RockFuncToTritonFuncPass   <-- bridge into the Triton (`tt`) dialect
+    -> Triton IR (TTIR)         via makeTTIR
+    -> TritonGPU IR (TTGIR)     via makeTTGIR
+    -> LLVM IR                  via makeLLIR
+    -> AMDGCN -> HSACO          via TritonToHsacoPass
+    -> Host glue (gpu.launch_func + LLVM lowering) via RestoreHostCode + buildHostLoweringPipeline
+```
+
+The four `rocmlir-driver` pipelines that drive this -- `rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline` -- are registered at the bottom of `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`. `rocmlir-driver`'s `-kernel-pipeline=` keywords (`migraphx`, `highlevel`, `gpu`, `triton`, `binary`, `full`) map onto these (see `rocmlir-tools.md`). Most Triton-side stages (`makeTTIR`/`makeTTGIR`/`makeLLIR`, `TritonToHsacoPass`) are C++ replicas of upstream Triton's Python `compiler.py`.
+
 ## Submodule layout
 
 - Submodule: `external/triton/` (declared in `.gitmodules`, branch tracked by SHA)
@@ -38,7 +54,7 @@ Both bridge passes are scheduled by `rock::buildKernelPipeline`. After they run,
 
 ## Python-to-C++ replication points
 
-These C++ functions/files mirror Triton Python logic. Whenever the submodule advances, audit them against upstream (see the `triton-bump` skill):
+These C++ functions/files mirror Triton Python logic. Whenever the submodule advances, audit them against upstream (full procedure: `triton-bump` skill):
 
 | Triton (Python / C++) | rocmlirTriton (C++) |
 |-----------------------|---------------------|
@@ -51,11 +67,13 @@ These C++ functions/files mirror Triton Python logic. Whenever the submodule adv
 | `ISAFamily`, hardware feature checks (`TargetUtils.h`) | `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` |
 | `triton_amd.cc` Python pass bindings | corresponding `pm->addPass(...)` calls in `Pipelines.cpp` |
 
-The four pass-pipeline registrations exposed to `rocmlir-opt` (`rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline`) live at the bottom of `Pipelines.cpp`. `rocmlir-driver`'s `-kernel-pipeline=` keywords (`migraphx`, `highlevel`, `gpu`, `triton`, `binary`, `full`) map onto these.
-
 ## Hardware feature detection
 
-Always use `rock::*` helpers (e.g. `rock::supportsTDM(arch)`) instead of `triton::AMD::TargetInfo(...)` directly. If a needed `rock` helper is missing, add one in `AmdArchDb.cpp` rather than calling Triton's `TargetInfo` from Rock code.
+Always use `rock::*` helpers (e.g. `rock::supportsTDM(arch)`) instead of `triton::AMD::TargetInfo(...)` directly. If a needed `rock` helper is missing, add one in `AmdArchDb.cpp` rather than calling Triton's `TargetInfo` from Rock code. This is the canonical rule referenced from `code-review.md`, `dev-workflow.md`, and the bump skill.
+
+## librockcompiler_deps.cmake
+
+The fat library `librockCompiler.a` (consumed by MIGraphX) has its dependency list pinned in `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake`. Regenerate it whenever Triton libraries are added/removed (almost always on Triton bumps); the regeneration command lives in the `triton-bump` skill.
 
 ## Intentionally NOT replicated
 
@@ -71,11 +89,4 @@ These Python features are intentionally absent from the C++ pipeline -- do **not
 
 ## After a submodule bump
 
-1. Rebuild LLVM with `bash scripts/build-llvm.sh`
-2. Re-validate every `triton-patches/*.patch`
-3. Diff the replication-point files against `${OLD_COMMIT}..${NEW_COMMIT}`
-4. Rebuild rocmlirTriton with `bash cmake.sh`
-5. Regenerate `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake` via `perl mlir/utils/jenkins/static-checks/get_fat_library_deps_list.pl`
-6. Run `bash tests.sh`
-
-See the `triton-bump` skill (`skills/triton-bump/SKILL.md`) and `docs/bump_triton_version.md` for the full workflow.
+The canonical step-by-step bump procedure is `docs/bump_triton_version.md` in the rocmlirTriton repo (10 steps: submodule update, LLVM rebuild, patch re-evaluation, upstream diffs, C++ replica sync, fat-library deps regen, tests). The `triton-bump` skill (`skills/triton-bump/SKILL.md`) wraps the doc with project conventions (bump branch naming, PR-description checklist, between-bumps `[TRITON-PATCH]` workflow). Always start from the doc -- don't open-code a bump.

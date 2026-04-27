@@ -49,8 +49,8 @@ ROCR_VISIBLE_DEVICES=0 python3 perfRunner.py --op gemm --batch_all -c <configs> 
 Tune first with `tuningRunner.py` (see `skills/tuningrunner-usage/SKILL.md`), then benchmark with the tuning database:
 
 ```bash
-# 1. Tune configs
-python3 tuningRunner.py --operation gemm --configs-file <configs> --output mlir_tuning.tsv
+# 1. Tune configs (note: --configs_file uses an underscore, not a dash)
+python3 tuningRunner.py --operation gemm --configs_file <configs> --output mlir_tuning.tsv
 
 # 2. Benchmark with tuning DB
 python3 perfRunner.py --op gemm --batch_all -c <configs> -t mlir_tuning.tsv
@@ -86,9 +86,9 @@ ls build/bin/ck-gemm-benchmark-driver
 ```bash
 cmake ... -DROCMLIR_ENABLE_BENCHMARKS=hipblaslt   # or 'ck' or 'all'
 ninja ci-performance-scripts hipblaslt-benchmark-driver
-# For CK baseline:
+# For CK baseline (target name uses '-gemm-', source dir is `ck-benchmark-driver/`):
 # cmake ... -DROCMLIR_ENABLE_BENCHMARKS=ck
-# ninja ci-performance-scripts ck-benchmark-driver
+# ninja ci-performance-scripts ck-gemm-benchmark-driver
 ```
 
 After modifying `perfRunner.py`, rebuild with `ninja ci-performance-scripts` to update the installed copy in the build directory.

@@ -9,167 +9,74 @@ description: >-
 
 # Triton Bump
 
-`external/triton/` is a **git submodule** of `triton-lang/triton`. Several Triton Python pipelines and helpers are replicated in C++ inside `mlir/`. Whenever the submodule advances, those replicas must be re-synced.
+## Canonical reference
 
-The full reference is `docs/bump_triton_version.md` -- read it once before starting and keep it open during the bump.
+**`docs/bump_triton_version.md`** in the rocmlirTriton repo is the source of truth. It is a 10-step guide with mapping tables, "Features intentionally NOT implemented" list, pass-interface-change recipes, troubleshooting, and a per-step progress checklist. **Read it end-to-end and follow it step by step**; this skill only adds the project conventions the doc doesn't cover (branch naming, PR-description checklist, between-bumps patch workflow).
 
-## Workflow
+The replication-point table (Python source → C++ destination) is also summarised in `rules/triton-integration.md`; the canonical fully-detailed table is in section 5 of the doc.
 
-### 1. Create the bump branch
+## Project conventions on top of the doc
+
+### 1. Bump branch
+
+Create a dedicated bump branch off `develop` before doing any of the doc's steps:
 
 ```bash
-git checkout develop
-git pull origin develop
+git checkout develop && git pull origin develop
 git checkout -b triton-bump-<month>-<year>     # or triton-bump-<short-sha>
 ```
 
-### 2. Record the old commit and update the submodule
+Every commit on this branch should use the `[TRITON-BUMP]` prefix (or `[TRITON-PATCH]` for a single patch update -- see below).
 
-```bash
-cd external/triton
-export OLD_COMMIT=$(git rev-parse HEAD)
-git fetch
-git checkout <new-target-sha>                  # or `git pull` to track upstream main
-export NEW_COMMIT=$(git rev-parse HEAD)
-cd ../..
-git add external/triton
-```
+### 2. Sync each C++ replica as a separate commit
 
-### 3. Rebuild LLVM via the wrapper
-
-The Triton submodule pins LLVM through `external/triton/cmake/llvm-hash.txt`; bumping Triton may bump LLVM too.
-
-```bash
-bash scripts/build-llvm.sh
-```
-
-This wrapper:
-1. Initializes submodules (recursive)
-2. Applies every `triton-patches/*.patch` to `external/triton/` (idempotent)
-3. Forces `MLIR_ENABLE_ROCM_RUNNER=ON` in Triton's build script
-4. Runs Triton's `scripts/build-llvm-project.sh`
-
-If a patch fails to apply, see step 4.
-
-### 4. Re-evaluate `triton-patches/`
-
-For each patch in `triton-patches/`:
-
-```bash
-cd external/triton
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- <files-touched-by-patch>
-```
-
-- If the upstream change already covers what the patch did, **delete the patch file**
-- If the patch still applies cleanly, leave it
-- If the patch conflicts, rebase it manually and update the file (commit with `[TRITON-PATCH] ...`)
-
-### 5. Diff the replication-source files
-
-```bash
-cd external/triton
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/backend/compiler.py > /tmp/compiler.py.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- python/src/llvm.cc > /tmp/llvm.cc.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/python/triton_amd.cc > /tmp/triton_amd.cc.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/lib/TritonAMDGPUTransforms/AccelerateAMDMatmul.cpp > /tmp/AccelerateAMDMatmul.cpp.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/include/TritonAMDGPUToLLVM/TargetUtils.h > /tmp/TargetUtils.h.diff
-cd ../..
-```
-
-### 6. Sync the C++ replicas
-
-| Triton (Python / C++) | rocmlirTriton (C++) |
-|-----------------------|---------------------|
-| `make_ttir`, `make_ttgir`, `make_llir` part 1 | `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` |
-| `make_llir` part 2, `make_amdgcn`, `make_hsaco` | `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` |
-| `init_targets`, `createTargetMachine`, `optimize_module` (`llvm.cc`) | `TritonToHsaco.cpp` (`initializeLLVMTargets`, `createTargetMachine`, `optimizeModule`) |
-| `getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaledElemType` (`AccelerateAMDMatmul.cpp`) | `mlir/lib/Dialect/Rock/utility/tritonUtils.cpp` (`mlirTypeToScaleDotElemType` extends BF16/FP16) |
-| `triton_amd.cc` Python pass bindings | corresponding `pm->addPass(...)` in `Pipelines.cpp` |
-| `ISAFamily` / hardware capabilities | `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` |
-
-For each diff, mirror the change in the corresponding C++ file. Notes:
-
-- New pass added in Python -> find C++ creation in `triton_amd.cc`, add the `pm->addPass(...)` call, include the relevant Triton header
-- Pass signature changed -> update the call site to match (check `external/triton/third_party/amd/include/TritonAMDGPUTransforms/Passes.h`)
-- New `ISAFamily` value -> update every switch in `AmdArchDb.cpp` (`getMatrixAccelKind`, `isFastAtomicAddSupported`, `isFastAtomicMaxSupported`, `getMaxNumChiplets`, `getMinNumCU`, `getMaxWavesPerEU`, etc.) and confirm `tritonUtils.cpp::getMfmaVersion`/`getWmmaVersion` handle the new chip
-- Hardware feature gates in Python -> use `rock::*` helpers in C++ (`rock::supportsTDM(arch)`), adding new helpers in `AmdArchDb.cpp` if needed
-- Skip features intentionally NOT replicated (see `rules/triton-integration.md`): `instrumentation.patch`, `knobs.*`, `add_di_scope`, `translate_to_mir`, `dump_sched_dag`, `swap_mir`, `dump_ir_*`, FPSan, `schedule_hint` loop processing
-
-Commit each fix separately with a descriptive message:
+Each fix in the doc's Step 5 should be a separate commit so reviewers can audit them individually:
 
 ```
 Sync <change>. Caused by https://github.com/triton-lang/triton/pull/NNNNN
 ```
 
-### 7. Build and fix breakage
+### 3. Local Triton patches between bumps
+
+`docs/bump_triton_version.md` covers re-evaluating existing patches during a bump (its Step 3). When you need to **add** a new local patch *between* bumps, follow:
 
 ```bash
-bash cmake.sh
+cd external/triton
+# ... edit files ...
+git diff > ../../triton-patches/<NN-name>.patch
+git checkout .                  # leave the submodule clean
+cd ../..
+git add triton-patches/<NN-name>.patch
+git commit -m "[TRITON-PATCH] <description>"
 ```
 
-Resolve compilation errors; expect some from upstream LLVM API changes that came in with the LLVM bump.
+The wrapper `scripts/build-llvm.sh` applies patches in lexicographic order, so prefix with a number if ordering matters. The patch must be:
 
-### 8. Regenerate `librockcompiler_deps.cmake`
+- Idempotent (`scripts/build-llvm.sh` checks via `git apply --check --reverse`)
+- Justified in the commit message
+- Either upstreamed or carry a comment explaining why it's a permanent fork (see "Decision tier" in `rules/code-review.md`)
 
-A bump can add or remove libraries baked into `librockCompiler.a`:
+### 4. PR description checklist
 
-```bash
-cd build
-perl ../mlir/utils/jenkins/static-checks/get_fat_library_deps_list.pl \
-  > ../mlir/tools/rocmlir-lib/librockcompiler_deps.cmake
-cd ..
-git add mlir/tools/rocmlir-lib/librockcompiler_deps.cmake
-```
-
-### 9. Run tests
-
-```bash
-bash tests.sh
-```
-
-If new top-level `fusion_*_with_host.mlir` files are added during the bump, also include them in `tests.sh`.
-
-### 10. Open the PR with the bump checklist
-
-PR description must include the bump checklist (lifted from `docs/bump_triton_version.md`):
+When opening the bump PR, paste this checklist into the PR body so reviewers can sign off line-by-line. (This is the **PR-facing** checklist; the doc's Section "Checklist Summary" is the agent's progress checklist while doing the work.)
 
 ```markdown
 ### Triton Bump Checklist
 
 - [ ] Submodule updated from `OLD_COMMIT` to `NEW_COMMIT`
 - [ ] LLVM rebuilt via `scripts/build-llvm.sh`
-- [ ] `triton-patches/` re-evaluated; obsolete patches removed
-- [ ] Diffed `compiler.py`, `llvm.cc`, `triton_amd.cc`, `AccelerateAMDMatmul.cpp`, `TargetUtils.h`
-- [ ] `Pipelines.cpp` synced (`make_ttir`, `make_ttgir`, `make_llir` part 1)
-- [ ] `TritonToHsaco.cpp` synced (`make_llir` part 2 + LLVM helpers)
-- [ ] `tritonUtils.cpp` synced (`getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaleDotElemType`)
-- [ ] `AmdArchDb.cpp` updated for any new `ISAFamily`
-- [ ] `librockcompiler_deps.cmake` regenerated
-- [ ] `cmake.sh` build succeeds
-- [ ] `tests.sh` passes
+- [ ] `triton-patches/` re-evaluated; obsolete patches removed (doc Step 3)
+- [ ] Diffed `compiler.py`, `llvm.cc`, `triton_amd.cc`, `AccelerateAMDMatmul.cpp`, `TargetUtils.h` (doc Step 4)
+- [ ] `Pipelines.cpp` synced (`make_ttir`, `make_ttgir`, `make_llir` part 1) (doc 5.1)
+- [ ] `TritonToHsaco.cpp` synced (`make_llir` part 2 + LLVM helpers) (doc 5.3)
+- [ ] `tritonUtils.cpp` synced (`getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaleDotElemType`) (doc 5.4)
+- [ ] `AmdArchDb.cpp` updated for any new `ISAFamily` (doc 5.5)
+- [ ] `librockcompiler_deps.cmake` regenerated (doc Step 9)
+- [ ] `cmake.sh` build succeeds (doc Step 8)
+- [ ] `tests.sh` passes (doc Step 10)
 - [ ] MIGraphX integration check (notify MIGraphX team if downstream impact)
 ```
 
-## Common failure patterns
+## When to deviate from the doc
 
-- **Missing pass**: new pass call in `compiler.py` -> find binding in `triton_amd.cc` and add C++ call
-- **Pass signature change**: check the new signature in `external/triton/third_party/amd/include/TritonAMDGPUTransforms/Passes.h`
-- **`ISAFamily` switch warnings**: `default:` case silently returned a fallback -- audit every `switch` in `AmdArchDb.cpp` and `tritonUtils.cpp`
-- **Test failures**: behavioral change upstream -- update the test expectation only after confirming the new behavior is intended
-- **Header errors**: mirror the includes from `triton_amd.cc` or other Triton files; CMake propagates Triton's include dirs through the helper functions in `cmake/triton.cmake`
-
-## Local Triton patches (between bumps)
-
-For targeted Triton fixes that cannot wait for upstream, add a new `triton-patches/<name>.patch` file:
-
-```bash
-cd external/triton
-# ... edit files ...
-git diff > ../../triton-patches/<name>.patch
-git checkout .          # leave the submodule clean
-cd ../..
-git add triton-patches/<name>.patch
-git commit -m "[TRITON-PATCH] <description>"
-```
-
-The wrapper applies patches in lexicographic order (`*.patch`), so prefix with a number if ordering matters.
+If you find a step in `docs/bump_triton_version.md` that is wrong or out of date during a bump, fix the doc in the same PR (or a follow-up `[NFC]` PR) -- don't fork the procedure into this skill.

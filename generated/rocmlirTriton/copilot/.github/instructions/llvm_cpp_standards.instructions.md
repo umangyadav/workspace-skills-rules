@@ -56,7 +56,7 @@ LDBG("rewrote " << op->getName() << " to " << newOp->getName());
 
 ## Triton-aware C++
 
-When calling into Triton, prefer the project's wrapper helpers in `mlir/lib/Dialect/Rock/utility/tritonUtils.cpp` and `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` over reaching directly into `triton::AMD::*`. This isolates the C++ surface that needs review on every Triton bump.
+The hardware-feature-detection rule (`rock::*` helpers vs. `triton::AMD::TargetInfo`) lives in `triton-integration.md` -- follow it whenever you call into Triton from rocMLIR-side code.
 
 When you genuinely need TritonGPU IR helpers (layouts, swizzling, linear-layout math), reach for the upstream utility headers rather than reimplementing -- in particular `triton/Tools/LayoutUtils.h`, `triton/Tools/LinearLayout.h`, `triton/Dialect/TritonGPU/Transforms/Utility.h`, and `triton/Dialect/Triton/IR/Utility.h`.
 

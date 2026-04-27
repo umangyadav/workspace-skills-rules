@@ -30,7 +30,7 @@ rocminfo | grep gfx
 
 ## Step 1: Generate kernel
 
-The runtime libs come from Triton's LLVM build under `external/triton/llvm-project/build/`:
+The runtime libs come from Triton's LLVM build under `external/triton/llvm-project/build/`. Set `$SHARED_LIBS` once and reuse below; the canonical four-library string is the same one `tests.sh` uses (also documented in `rules/rocmlir-tools.md`):
 
 ```bash
 SHARED_LIBS="external/triton/llvm-project/build/lib/libmlir_rocm_runtime.so,build/lib/libconv-validation-wrappers.so,external/triton/llvm-project/build/lib/libmlir_runner_utils.so,external/triton/llvm-project/build/lib/libmlir_c_runner_utils.so"
@@ -131,7 +131,7 @@ Key parameters: `--att-target-cu`, `--att-shader-engine-mask`, `--att-simd-selec
 
 ### Using with rocmlirTriton
 
-Create a `run.sh` with full absolute paths:
+Create a `run.sh` with full absolute paths. `mlir/utils/widgets/rocm-run` is the canonical wrapper for `mlir-runner` -- prefer it over typing the long `--shared-libs=...` line.
 
 ```bash
 #!/bin/bash

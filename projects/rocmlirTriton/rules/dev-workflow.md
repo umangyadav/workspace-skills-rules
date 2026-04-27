@@ -7,34 +7,31 @@
 3. Add lowering in `mlir/lib/Dialect/Rock/Transforms/` using `OpRewritePattern` or `OpConversionPattern`
 4. Register pass in `mlir/include/mlir/Dialect/Rock/Passes.td`
 5. Wire into pipeline in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`
-6. Add Lit tests in `mlir/test/Dialect/Rock/` (round-trip + pass tests)
-7. Update `CMakeLists.txt` if new files added
+6. Add Lit tests in `mlir/test/Dialect/Rock/` (round-trip + pass tests; patterns in `testing-conventions.md`)
+7. Update `CMakeLists.txt` if new files added (helpers in `cmake-conventions.md`)
 
 ## Adding a conversion pass (e.g. FooToBar)
 
 1. Declare in `mlir/include/mlir/Conversion/RocMLIRPasses.td`
 2. Create `mlir/lib/Conversion/FooToBar/` with pattern + pass `.cpp` files
-3. Add `add_rocmlir_conversion_library(...)` in CMakeLists
+3. Add `add_rocmlir_conversion_library(...)` in `CMakeLists.txt`
 4. Add Lit tests in `mlir/test/Conversion/FooToBar/`
 
 ## Touching the Rock <-> Triton bridge
 
-The two passes that translate Rock dialect IR into Triton's `tt` dialect:
+The two bridge passes (`-rock-to-ttir`, `-rock-func-to-triton-func`) and their files are documented in `triton-integration.md`. When extending them:
 
-- `mlir/lib/Dialect/Rock/Transforms/RockToTTIR.cpp` (`-rock-to-ttir`) -- rewrite Rock blockwise/gemm ops to `tt.load`/`tt.store`/`tt.dot`/`tt.reduce`. Add a new `OpRewritePattern` here when you introduce a Rock op that needs to reach the GPU through Triton.
-- `mlir/lib/Dialect/Rock/Transforms/FuncToTritonFunc.cpp` (`-rock-func-to-triton-func`) -- module-level pass that turns `func.func` kernels into `tt.func`, lifts tensor args to `!tt.ptr`, and folds pointer arith into `tt.addptr`. Touch this when the kernel calling convention or pointer-attribute layout changes.
-
-Both are scheduled by `rock::buildKernelPipeline` in `Pipelines.cpp`. After they run, the kernel module body is `tt.func` only.
+- Add a new `OpRewritePattern` in `RockToTTIR.cpp` when you introduce a Rock op that needs to reach the GPU through Triton.
+- Touch `FuncToTritonFunc.cpp` when the kernel calling convention or pointer-attribute layout changes.
 
 ## Touching the Triton-driven pipeline
 
 If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
 
 1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`.
-2. Mirror the change in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` (`makeTTIR`/`makeTTGIR`/`makeLLIR` -- TTIR/TTGIR/LLIR MLIR-side passes) or `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (LLVM IR finalization, AMDGCN, HSACO).
-3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes.
-4. If you need a hardware capability not yet exposed by `rock`, add it to `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` rather than reaching into `triton::AMD::TargetInfo`.
-5. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
+2. Mirror the change in the corresponding C++ replication point (table in `triton-integration.md`).
+3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes; add new helpers in `AmdArchDb.cpp` if needed.
+4. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
 
 ## Adding a MIGraphX operation
 
@@ -44,26 +41,10 @@ If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
 
 ## Testing a new operation or feature
 
-### Architecture coverage
+Architecture coverage, dtype coverage, edge cases, and fusion-test requirements are documented in `testing-conventions.md`. The two key rules:
 
-- New ops/passes must work on all supported GPU architectures (`gfx90a`, `gfx942`, `gfx950`, `gfx1100`, ...)
-- If an op is architecture-specific, guard it with proper target checks in both code and tests
-- Use `lit.cfg.py` to configure arch-specific test guards
-
-### Data type coverage
-
-- Enumerate all dtypes the op should support (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, `i4`, etc.)
-- Ensure the implementation handles each supported dtype explicitly -- do not silently fall through
-- Return a clear error (`emitOpError`) for unsupported dtypes rather than producing wrong results
-- Add E2E tests covering each supported dtype and Lit tests that verify unsupported dtypes are rejected
-- Scaled GEMM features must respect the `f8E8M0FNU` scale convention (see `docs/scaled_gemm.md`)
-
-### Edge cases and completeness
-
-- Consider boundary conditions: zero-size tensors, non-aligned shapes, large dimensions, scalar inputs
-- For optimization passes, verify the optimization fires (FileCheck for expected IR) and verify correctness (E2E with random data)
-- Test both the optimized path and the fallback/unoptimized path
-- If the feature interacts with fusion, test fused and unfused variants and update `tests.sh` if a new top-level `fusion_*_with_host.mlir` is added
+- New ops/passes must work on every supported GPU arch present in CI; arch-specific paths must be guarded in both code and tests.
+- Enumerate all supported dtypes (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, `i4`, ...); reject unsupported ones with `emitOpError`.
 
 ## Debugging a pass failure
 
@@ -96,8 +77,6 @@ rocmlir-opt --rock-func-to-triton-func input.mlir
 
 # Run only the Triton-driven pass pipeline on a tt.func module
 rocmlir-opt --rock-triton-pipeline='arch=gfx942 num-warps=4 ...' tt.mlir
-
-# Compare against upstream Triton's Python pipeline by running a reference
-# kernel through `python -m triton.runtime.compile` (only when Triton's
-# Python module is available; not built by default in this repo)
 ```
+
+For full lowering + GPU validation (incl. the canonical `mlir-runner --shared-libs=...` invocation), use the `mlir/utils/widgets/rocm-run` wrapper or copy the line out of `tests.sh` -- see `rocmlir-tools.md` for the explicit form.

@@ -86,7 +86,7 @@ In Cursor Settings > Rules, add the GitHub repo URL under "Remote Rules". Cursor
 
 [rocMLIR](https://github.com/ROCm/rocMLIR) -- an MLIR-based kernel generator for AMD GPUs.
 
-- 9 rules, 7 skills
+- 10 rules, 7 skills
 - See `projects/rocmlir/` for details
 
 ### rocmlirTriton

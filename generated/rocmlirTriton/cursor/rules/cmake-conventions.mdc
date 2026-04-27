@@ -100,7 +100,7 @@ When a rocMLIR library (`add_rocmlir_*`) needs Triton symbols (e.g. `mlir/lib/Di
 | `ROCMLIR_DRIVER_E2E_TEST_ENABLED` | OFF | Build E2E driver tests |
 | `ROCMLIR_DRIVER_PR_E2E_TEST_ENABLED` | OFF | PR-scoped E2E tests |
 | `ROCMLIR_DRIVER_RANDOM_DATA_SEED` | `none` | Random-data E2E mode |
-| `ROCMLIR_GEN_FLAGS` | "" | Extra flags forwarded to `rocmlir-gen` (e.g. `-mfma=off -wmma=off`) |
+| `ROCMLIR_GEN_FLAGS` | "" | Extra flags forwarded to `rocmlir-gen` in lit substitutions (use only flags this fork's `rocmlir-gen` accepts; `-mfma=off -wmma=off` from upstream rocMLIR no longer applies here) |
 | `ROCMLIR_ENABLE_BENCHMARKS` | "" | `hipblaslt`, `ck`, or `all` |
 | `MLIR_ENABLE_ROCM_RUNNER` | ON | Required for `mlir-runner` GPU execution |
 | `ROCMLIR_PARALLEL_LINK_JOBS` / `_COMPILE_JOBS` | "" | Limit Ninja link/compile concurrency |

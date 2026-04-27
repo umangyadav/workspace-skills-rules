@@ -12,21 +12,7 @@
 
 rocmlirTriton is a fork/derivative of [rocMLIR](https://github.com/ROCm/rocMLIR) that lowers Rock dialect kernels (convolution, GEMM, attention, fused ops) through [OpenAI Triton](https://github.com/triton-lang/triton)'s TTIR/TTGIR/LLIR pipeline to AMD GPU code. It targets AMD hardware (ROCm).
 
-## Compilation arc
-
-```
-TOSA / MIGraphX
-    -> highlevel  (Linalg + Rock view-to-transform, fold-broadcast, ...)
-    -> Rock dialect (rock.gemm/conv/attention -> rock.gridwise -> rock.blockwise -> ptr arith)
-    -> RockToTTIRPass + RockFuncToTritonFuncPass   <-- bridge into the Triton (`tt`) dialect
-    -> Triton IR (TTIR)         via makeTTIR
-    -> TritonGPU IR (TTGIR)     via makeTTGIR
-    -> LLVM IR                  via makeLLIR
-    -> AMDGCN -> HSACO          via TritonToHsacoPass
-    -> Host glue (gpu.launch_func + LLVM lowering) via RestoreHostCode + buildHostLoweringPipeline
-```
-
-The four rocmlir-driver pipelines that drive this are `rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline` (see `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`). Most of the Triton-side stages (`makeTTIR`/`makeTTGIR`/`makeLLIR`, `TritonToHsacoPass`) are C++ replicas of upstream Triton's Python `compiler.py`.
+The compilation arc, the four `rocmlir-driver` pipelines, the Rock<->Triton bridge passes, and the Python-to-C++ replication points all live in `triton-integration.md`. The CLI tools (`rocmlir-gen`, `rocmlir-driver`, `rocmlir-opt`, `rocmlir-tuning-driver`, `rocmlir-translate`, `rocmlir-lsp-server`) and their flags are documented in `rocmlir-tools.md`. Build/test commands live in the `build-test-workflow` skill.
 
 ## Key facts
 
@@ -38,31 +24,11 @@ The four rocmlir-driver pipelines that drive this are `rock-highlevel-pipeline`,
 ## Source layout
 
 - `mlir/` -- all rocmlirTriton sources (edit here)
-- `external/triton/` -- **git submodule** of upstream Triton; brings its own `external/triton/llvm-project/` LLVM/MLIR
+- `external/triton/` -- **git submodule** of upstream Triton; brings its own `external/triton/llvm-project/` LLVM/MLIR. `mlir-runner` and the `libmlir_*_runtime.so` shared libraries used by `tests.sh` come from `external/triton/llvm-project/build/`
 - `triton-patches/*.patch` -- local patches applied on top of the Triton submodule by `scripts/build-llvm.sh`
 - `cmake/triton.cmake` -- wires `find_package(MLIR)` and `add_subdirectory(external/triton)` and defines `add_rocmlir_*` helpers
-- `scripts/build-llvm.sh` -- wrapper that initializes submodules, applies `triton-patches/`, forces `MLIR_ENABLE_ROCM_RUNNER=ON`, and runs Triton's `build-llvm-project.sh`
-- `cmake.sh` -- build helper that calls `scripts/build-llvm.sh`, configures CMake with `BUILD_FAT_LIBROCKCOMPILER=ON`, and runs Ninja
-- `tests.sh` -- E2E smoke tests run end-to-end via `mlir-runner` from `external/triton/llvm-project/build/`
+- `scripts/build-llvm.sh`, `cmake.sh`, `tests.sh` -- canonical build/test entry points (see `build-test-workflow` skill)
 - `docs/` -- in-tree design docs (`bump_triton_version.md`, `scaled_gemm.md`, `cpu_validation_optimization.md`)
-
-## Tools
-
-- `rocmlir-gen` -- generate Rock dialect kernels and host harness
-- `rocmlir-driver` -- run kernel/host pipelines (`-c` is the default full pipeline)
-- `rocmlir-opt` -- MLIR optimizer with Rock + Triton passes registered
-- `rocmlir-tuning-driver` -- JIT tuning harness over perf configs
-- `rocmlir-translate` -- translate IR (e.g. `--gpu-module-to-rocdir`, `--triton-to-hsaco`)
-- `rocmlir-lsp-server` -- LSP server for editor integration
-
-## Build
-
-```sh
-bash cmake.sh                # default: BUILD_FAT_LIBROCKCOMPILER=ON, RelWithDebInfo, lld
-bash tests.sh                # E2E smoke + targeted lit suites
-```
-
-`mlir-runner` and the `libmlir_*_runtime.so` shared libraries come from `external/triton/llvm-project/build/`, **not** from a sibling `external/llvm-project/`.
 
 ## Commit messages
 
@@ -81,11 +47,11 @@ This repo is **private** today, but treat it as if it could be open-sourced at a
 - Internal-only references (NDA hardware codenames, unannounced chip IDs, customer names, internal Jira/Confluence URLs, internal Slack/email content) belong in internal trackers, **not** in this repo.
 - It is fine to reference unreleased `gfx*` IDs only when they are already mentioned upstream (in the pinned Triton submodule, the LLVM AMDGPU backend, or upstream rocMLIR). Otherwise prefer publicly released `gfx*` identifiers.
 - Do not paste customer kernels, model weights, or proprietary IR dumps into the repo (tests, comments, or commit bodies).
-- License headers, third-party notices, and Apache 2.0 + LLVM Exceptions language must already be in place on every new file -- "we'll fix headers before going public" is not an acceptable plan.
+- License headers, third-party notices, and Apache 2.0 + LLVM Exceptions language must already be in place on every new file -- "we'll fix headers before going public" is not an acceptable plan (template in `code-review.md`).
 
 ## Downstream impact
 
-Breaking changes to Rock dialect IR or C API require coordination with MIGraphX. Always keep `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake` in sync after any dependency change (especially Triton bumps).
+Breaking changes to Rock dialect IR or C API require coordination with MIGraphX. Always keep `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake` in sync after any dependency change (especially Triton bumps -- regenerated as part of the `triton-bump` skill).
 
 
 ---
@@ -93,6 +59,22 @@ Breaking changes to Rock dialect IR or C API require coordination with MIGraphX.
 # Triton Integration
 
 rocmlirTriton depends on upstream [Triton](https://github.com/triton-lang/triton) as a git submodule. Triton brings its own LLVM/MLIR and AMD backend; we replicate parts of Triton's Python pipeline in C++.
+
+## Compilation arc
+
+```
+TOSA / MIGraphX
+    -> highlevel  (Linalg + Rock view-to-transform, fold-broadcast, ...)
+    -> Rock dialect (rock.gemm/conv/attention -> rock.gridwise -> rock.blockwise -> ptr arith)
+    -> RockToTTIRPass + RockFuncToTritonFuncPass   <-- bridge into the Triton (`tt`) dialect
+    -> Triton IR (TTIR)         via makeTTIR
+    -> TritonGPU IR (TTGIR)     via makeTTGIR
+    -> LLVM IR                  via makeLLIR
+    -> AMDGCN -> HSACO          via TritonToHsacoPass
+    -> Host glue (gpu.launch_func + LLVM lowering) via RestoreHostCode + buildHostLoweringPipeline
+```
+
+The four `rocmlir-driver` pipelines that drive this -- `rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline` -- are registered at the bottom of `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`. `rocmlir-driver`'s `-kernel-pipeline=` keywords (`migraphx`, `highlevel`, `gpu`, `triton`, `binary`, `full`) map onto these (see `rocmlir-tools.md`). Most Triton-side stages (`makeTTIR`/`makeTTGIR`/`makeLLIR`, `TritonToHsacoPass`) are C++ replicas of upstream Triton's Python `compiler.py`.
 
 ## Submodule layout
 
@@ -124,7 +106,7 @@ Both bridge passes are scheduled by `rock::buildKernelPipeline`. After they run,
 
 ## Python-to-C++ replication points
 
-These C++ functions/files mirror Triton Python logic. Whenever the submodule advances, audit them against upstream (see the `triton-bump` skill):
+These C++ functions/files mirror Triton Python logic. Whenever the submodule advances, audit them against upstream (full procedure: `triton-bump` skill):
 
 | Triton (Python / C++) | rocmlirTriton (C++) |
 |-----------------------|---------------------|
@@ -137,11 +119,13 @@ These C++ functions/files mirror Triton Python logic. Whenever the submodule adv
 | `ISAFamily`, hardware feature checks (`TargetUtils.h`) | `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` |
 | `triton_amd.cc` Python pass bindings | corresponding `pm->addPass(...)` calls in `Pipelines.cpp` |
 
-The four pass-pipeline registrations exposed to `rocmlir-opt` (`rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline`) live at the bottom of `Pipelines.cpp`. `rocmlir-driver`'s `-kernel-pipeline=` keywords (`migraphx`, `highlevel`, `gpu`, `triton`, `binary`, `full`) map onto these.
-
 ## Hardware feature detection
 
-Always use `rock::*` helpers (e.g. `rock::supportsTDM(arch)`) instead of `triton::AMD::TargetInfo(...)` directly. If a needed `rock` helper is missing, add one in `AmdArchDb.cpp` rather than calling Triton's `TargetInfo` from Rock code.
+Always use `rock::*` helpers (e.g. `rock::supportsTDM(arch)`) instead of `triton::AMD::TargetInfo(...)` directly. If a needed `rock` helper is missing, add one in `AmdArchDb.cpp` rather than calling Triton's `TargetInfo` from Rock code. This is the canonical rule referenced from `code-review.md`, `dev-workflow.md`, and the bump skill.
+
+## librockcompiler_deps.cmake
+
+The fat library `librockCompiler.a` (consumed by MIGraphX) has its dependency list pinned in `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake`. Regenerate it whenever Triton libraries are added/removed (almost always on Triton bumps); the regeneration command lives in the `triton-bump` skill.
 
 ## Intentionally NOT replicated
 
@@ -157,14 +141,7 @@ These Python features are intentionally absent from the C++ pipeline -- do **not
 
 ## After a submodule bump
 
-1. Rebuild LLVM with `bash scripts/build-llvm.sh`
-2. Re-validate every `triton-patches/*.patch`
-3. Diff the replication-point files against `${OLD_COMMIT}..${NEW_COMMIT}`
-4. Rebuild rocmlirTriton with `bash cmake.sh`
-5. Regenerate `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake` via `perl mlir/utils/jenkins/static-checks/get_fat_library_deps_list.pl`
-6. Run `bash tests.sh`
-
-See the `triton-bump` skill (`skills/triton-bump/SKILL.md`) and `docs/bump_triton_version.md` for the full workflow.
+The canonical step-by-step bump procedure is `docs/bump_triton_version.md` in the rocmlirTriton repo (10 steps: submodule update, LLVM rebuild, patch re-evaluation, upstream diffs, C++ replica sync, fat-library deps regen, tests). The `triton-bump` skill (`skills/triton-bump/SKILL.md`) wraps the doc with project conventions (bump branch naming, PR-description checklist, between-bumps `[TRITON-PATCH]` workflow). Always start from the doc -- don't open-code a bump.
 
 
 ---
@@ -225,7 +202,7 @@ LDBG("rewrote " << op->getName() << " to " << newOp->getName());
 
 ## Triton-aware C++
 
-When calling into Triton, prefer the project's wrapper helpers in `mlir/lib/Dialect/Rock/utility/tritonUtils.cpp` and `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` over reaching directly into `triton::AMD::*`. This isolates the C++ surface that needs review on every Triton bump.
+The hardware-feature-detection rule (`rock::*` helpers vs. `triton::AMD::TargetInfo`) lives in `triton-integration.md` -- follow it whenever you call into Triton from rocMLIR-side code.
 
 When you genuinely need TritonGPU IR helpers (layouts, swizzling, linear-layout math), reach for the upstream utility headers rather than reimplementing -- in particular `triton/Tools/LayoutUtils.h`, `triton/Tools/LinearLayout.h`, `triton/Dialect/TritonGPU/Transforms/Utility.h`, and `triton/Dialect/Triton/IR/Utility.h`.
 
@@ -348,7 +325,7 @@ When a rocMLIR library (`add_rocmlir_*`) needs Triton symbols (e.g. `mlir/lib/Di
 | `ROCMLIR_DRIVER_E2E_TEST_ENABLED` | OFF | Build E2E driver tests |
 | `ROCMLIR_DRIVER_PR_E2E_TEST_ENABLED` | OFF | PR-scoped E2E tests |
 | `ROCMLIR_DRIVER_RANDOM_DATA_SEED` | `none` | Random-data E2E mode |
-| `ROCMLIR_GEN_FLAGS` | "" | Extra flags forwarded to `rocmlir-gen` (e.g. `-mfma=off -wmma=off`) |
+| `ROCMLIR_GEN_FLAGS` | "" | Extra flags forwarded to `rocmlir-gen` in lit substitutions (use only flags this fork's `rocmlir-gen` accepts; `-mfma=off -wmma=off` from upstream rocMLIR no longer applies here) |
 | `ROCMLIR_ENABLE_BENCHMARKS` | "" | `hipblaslt`, `ck`, or `all` |
 | `MLIR_ENABLE_ROCM_RUNNER` | ON | Required for `mlir-runner` GPU execution |
 | `ROCMLIR_PARALLEL_LINK_JOBS` / `_COMPILE_JOBS` | "" | Limit Ninja link/compile concurrency |
@@ -396,75 +373,66 @@ Before every commit, run `git clang-format --diff origin/develop` (or the approp
 
 For changes that touch `external/triton/` or `triton-patches/`, additionally run `pre-commit run --from-ref origin/develop --to-ref HEAD` (or `--from-ref upstream/main` when validating against upstream Triton). This mirrors the upstream Triton hook stack -- ruff, yapf, clang-format (LLVM v19.1.6), mypy, plus the standard `pre-commit-hooks` set (trailing-whitespace, end-of-file-fixer, check-merge-conflict, debug-statements, detect-private-key, etc.).
 
-## Premerge CI gates
-
-- **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed) -- on Jenkins this gate runs **only on the `mfma` matrix row** via `mlir/utils/jenkins/static-checks/premerge-checks.py`
-- **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`); same `mfma`-only gating
-- **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`); no pytest gate exists yet
-- **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline` (uses ROCm/ROCm's `rocMLIR.yml` template)
-- **Jenkins**: PR pipeline only today (`Jenkinsfile`, private CI); nightly/weekly stages exist in source but are commented out. `Jenkinsfile.downstream` is deprecated (public CI is no longer used) and `Jenkinsfile.release` only stores release builds.
+CI gates and where they run (Jenkins, Azure, GitHub Actions) are summarised in `ci-pipelines.md`; the Python lint config is in `python-standards.md`.
 
 ## Reference
 
 - [LLVM Coding Standards](https://llvm.org/docs/CodingStandards.html) -- the authoritative style guide
+- `llvm-cpp-standards.md` -- rocmlirTriton-specific C++ patterns (debug macros, casting, namespaces, naming)
+- `cmake-conventions.md` -- CMake helpers and `external/triton/` style rules
 
 ## Critical (blocks merge)
 
-- No unreleased hardware codenames, unannounced chip IDs, or NDA features in code/comments/commits/docs
+- No unreleased hardware codenames, unannounced chip IDs, or NDA features (full confidentiality policy in `project-overview.md`)
 - No C++ exceptions; use `LogicalResult` / `emitOpError` / `signalPassFailure`
 - No RTTI (`dynamic_cast`, `typeid`); use LLVM's `isa`/`cast`/`dyn_cast`
 - No special values (e.g. `-1`, `nullptr`) to signal failure; use `FailureOr<>` instead
 - No `#include <iostream>`; use LLVM's `raw_ostream` for all output
 - No `using namespace std`; always use explicit `std::` prefix
 - No static constructors/destructors (global objects with ctors/dtors)
-- No committed temp/generated files (build artifacts, `*.pyc`, editor files, secrets, profiler output) -- see shared rule `workspace-hygiene`
+- No committed temp/generated files -- see shared rule `workspace-hygiene`
 - No direct edits to `external/triton/`; capture local changes as `triton-patches/*.patch` instead
 - Breaking IR or C API changes must be documented and coordinated with MIGraphX
-- Triton submodule bumps in `external/triton` must come with the C++ replication audit (see `triton-integration.md` and the `triton-bump` skill)
+- Triton submodule bumps must come with the C++ replication audit (see `triton-integration.md` and the `triton-bump` skill)
 
 ## Major
 
-- Follow DRY (don't repeat yourself), YAGNI (you aren't gonna need it), KISS (keep it simple)
+- Follow DRY, YAGNI, KISS
 - No raw `new`/`delete`; use MLIR's allocation utilities, `std::unique_ptr`, or arena-based ownership
 - Prefer composition over inheritance; CRTP only where MLIR/LLVM requires it
 - Prefer `StringRef`, `ArrayRef`, `MutableArrayRef` over `std::string`, `std::vector` for non-owning parameters
 - Prefer `SmallVector` over `std::vector` for small/local collections
 - Prefer `llvm::DenseMap` over `std::map`/`std::unordered_map`
 - Use `assert` liberally with descriptive messages; use `llvm_unreachable` for impossible paths (not `assert(false)`)
-- Prefer C++-style casts (`static_cast`, `const_cast`) over C-style casts
 - Restrict visibility: `static` for file-local functions, anonymous namespaces only for class declarations
 - No default labels in fully covered switches over enumerations (preserves `-Wswitch`); important when consuming Triton's `ISAFamily` enum
-- Use `llvm::sort` instead of `std::sort` to avoid non-determinism with equal elements
+- Use `llvm::sort` instead of `std::sort` to avoid non-determinism
 - Naming: classes `CamelCase`, functions/vars `camelBack` (per LLVM style and `.clang-tidy`)
 - New ops need `hasVerifier = 1` with `verify()` implementation
-- New passes and ops need positive E2E tests and both positive and negative Lit tests with FileCheck
-- New optimizations must verify presence of expected IR ops/instructions via FileCheck
-- Lit tests must follow [MLIR FileCheck best practices](https://mlir.llvm.org/getting_started/TestingGuide/#filecheck-best-practices) -- in particular "tests should be minimal". Don't dump a full Python-generated module; reduce to the smallest IR fragment that exercises the change. Bug fixes specifically should ship a minimized regression test.
+- New passes and ops need positive E2E tests and both positive and negative Lit tests with FileCheck (patterns in `testing-conventions.md`)
+- Lit tests must follow [MLIR FileCheck best practices](https://mlir.llvm.org/getting_started/TestingGuide/#filecheck-best-practices) -- "tests should be minimal". Bug fixes ship a minimized regression test.
 - Errors propagated via `LogicalResult`, never silently dropped
-- `librockcompiler_deps.cmake` updated when fat-library dependencies change
-- Hardware feature checks go through `rock::*` helpers (e.g. `rock::supportsTDM`), not `triton::AMD::TargetInfo` directly
-- License header on new files (SPDX `Apache-2.0 WITH LLVM-exception`)
+- `librockcompiler_deps.cmake` updated when fat-library deps change (see `triton-integration.md`)
+- Hardware feature checks go through `rock::*` helpers (see `triton-integration.md`), not `triton::AMD::TargetInfo`
+- License header on new files (template below)
 - TODOs must reference a tracking issue: `TODO(#issue-number)`
 
 ## Minor
 
 - Include order: main module header, local/private, MLIR/LLVM, stdlib (each sorted lexicographically)
 - Headers must be self-contained with proper include guards
-- Comments as English prose with proper capitalization; use `///` for Doxygen on public APIs
+- Comments as English prose with proper capitalization; `///` for Doxygen on public APIs
 - Prefer early returns; no `else` after `return`
-- Prefer preincrement (`++i`) over postincrement (`i++`)
-- Prefer range-based for loops; don't re-evaluate `end()` in explicit iterator loops
-- Omit braces for single simple statements; use braces for multi-statement or nested blocks
+- Prefer preincrement; range-based for loops; don't re-evaluate `end()` in iterator loops
+- Omit braces for single simple statements; brace multi-statement / nested blocks
 - `auto` only when type is obvious; `auto &` for values, `auto *` for pointers to avoid copies
-- Don't use `inline` for functions defined in class bodies (already implicitly inline)
-- Spaces before parentheses only in control flow (`if (x)`), not function calls (`foo(x)`)
 - Files end with newline; no trailing whitespace
 
 ## License headers
 
 All new `.cpp`, `.h`, and `.py` files must include a license header with the correct current year. Verify on every review.
 
-**C++/Header files (`.cpp`, `.h`):**
+**C++/Header files:**
 
 ```
 //===- FileName.cpp - Brief description ----------------------------------===//
@@ -476,7 +444,7 @@ All new `.cpp`, `.h`, and `.py` files must include a license header with the cor
 //===----------------------------------------------------------------------===//
 ```
 
-**Python files (`.py`):**
+**Python files:**
 
 ```
 # Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -484,23 +452,20 @@ All new `.cpp`, `.h`, and `.py` files must include a license header with the cor
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 ```
 
-**Review checklist:**
-- Header present on all new source, header, and Python files
-- Copyright year matches the current year (not copied from older files)
-- SPDX identifier is exactly `Apache-2.0 WITH LLVM-exception`
+Checklist: header present on all new source/header/Python files; copyright year matches the current year (not copied from older files); SPDX is exactly `Apache-2.0 WITH LLVM-exception`.
 
 ## PR description
 
-Write the description per the upstream Triton template style: explain **why, not how** ([reference](https://cbea.ms/git-commit/#why-not-how)). Reviewers use the diff to see *what* changed; the description should justify *why* the change is correct and worth landing. Either include a test (lit / unittest / E2E) or call out explicitly why one isn't needed.
+Write per the upstream Triton template style: explain **why, not how** ([reference](https://cbea.ms/git-commit/#why-not-how)). Reviewers use the diff to see *what* changed; the description should justify *why* the change is correct and worth landing. Either include a test (lit / unittest / E2E) or call out explicitly why one isn't needed.
 
 ## Upstream Triton review conventions (for `external/triton/` and submodule bumps)
 
-When the change touches `external/triton/`, `triton-patches/`, or bumps the Triton SHA, apply these upstream conventions on top of the rocMLIR review checklist above:
+When the change touches `external/triton/`, `triton-patches/`, or bumps the Triton SHA, apply these on top of the checklist above:
 
-- **Code style**: Triton uses `BasedOnStyle: LLVM` clang-format -- identical to ours -- so the same `git clang-format` workflow works. Triton-side libraries also build with `-fno-exceptions -fno-rtti -Werror -Wno-covered-switch-default -fvisibility=hidden`; don't introduce code that violates these.
-- **Decision tier**: Triton's `CONTRIBUTING.md` distinguishes "uncontroversial" changes (bug fixes, perf wins with reasonable trade-offs) from "controversial" ones (IR / API / pass infra changes). Patches in `triton-patches/` that change Triton IR or pass behaviour belong in the controversial tier and need an explicit upstream-direction note in the PR description -- either "this will be upstreamed as PR #N" or "this is a permanent fork because ...".
-- **Test placement** (if you add Triton-side tests): `external/triton/test/` for lit, `external/triton/unittest/` for C++ gtest, `external/triton/python/test/` for end-to-end Python tests. Avoid creating new test files unless necessary -- extend an existing one.
-- **MLIR reproducer**: when a Triton-stage crash happens during review, ask the author for the MLIR reproducer (Triton emits one with `external_resources / mlir_reproducer` metadata). Save it to `/tmp/repro.mlir` and reproduce locally with `triton-opt /tmp/repro.mlir --run-reproducer`. Don't accept "works on my machine" for compiler crashes.
+- **Code style**: Triton uses `BasedOnStyle: LLVM` clang-format -- identical to ours -- so the same `git clang-format` workflow works. Triton-side compile flags (`-fno-exceptions -fno-rtti -Werror -Wno-covered-switch-default -fvisibility=hidden`) are documented in `cmake-conventions.md`; don't introduce code that violates them.
+- **Decision tier**: Triton's `CONTRIBUTING.md` distinguishes "uncontroversial" changes (bug fixes, perf wins) from "controversial" ones (IR / API / pass infra). `triton-patches/` that change Triton IR or pass behaviour belong in the controversial tier and need an upstream-direction note in the PR description -- either "this will be upstreamed as PR #N" or "this is a permanent fork because ...".
+- **Test placement**: `external/triton/test/` for lit, `external/triton/unittest/` for C++ gtest, `external/triton/python/test/` for E2E Python tests. Avoid creating new test files unless necessary -- extend an existing one.
+- **MLIR reproducer**: when a Triton-stage crash happens during review, ask the author for the MLIR reproducer (Triton emits one with `external_resources / mlir_reproducer` metadata). Save it to `/tmp/repro.mlir` and reproduce with `triton-opt /tmp/repro.mlir --run-reproducer`. Don't accept "works on my machine" for compiler crashes.
 - **CODEOWNERS awareness**: `external/triton/.github/CODEOWNERS` is per-file at `.h` / `.cpp` granularity (e.g. `lib/Analysis/Alias.cpp @Jokeren`, `lib/Dialect/TritonGPU/Transforms/Pipeline.cpp @ptillet`). When patching one of those files locally, name the upstream owner in the PR description so the reviewer knows whose code we're diverging from -- this also makes upstreaming the patch later much easier.
 - **No new contributor checklist**: our Jenkins doesn't enforce upstream's PR template, but the spirit (run pre-commit, add tests, justify trivial-only changes) is the same.
 
@@ -515,7 +480,7 @@ When the change touches `external/triton/`, `triton-patches/`, or bumps the Trit
 
 # Testing Conventions
 
-See also: `code-review.md` (Major section) and `dev-workflow.md` (Testing a new operation or feature) for review-time testing requirements.
+This rule is the canonical home for *what* tests must exist and *how* they're written. For *when* tests are required at review time, see `code-review.md`. The high-level workflow for adding a new op/pass is in `dev-workflow.md`.
 
 ## When to use each test type
 
@@ -523,8 +488,8 @@ See also: `code-review.md` (Major section) and `dev-workflow.md` (Testing a new 
 |------|----------|---------|
 | **Lit** (`.mlir`) | `mlir/test/` | Passes, pipelines, driver integration |
 | **GoogleTest** | `mlir/unittests/` | C++ helpers, attributes, transform maps |
-| **E2E (lit)** | `mlir/test/e2e/`, `mlir/test/fusion/pr-e2e/`, `mlir/test/fusion/nightly-misc-e2e/`, `mlir/test/fusion/resnet50-e2e/` | Full GPU pipeline |
-| **E2E (smoke)** | top-level `tests.sh`, `test_prefill_changes.sh` | Hand-curated GPU smoke tests covering gemm/conv/attention/fusion |
+| **E2E (lit)** | `mlir/test/e2e/`, `mlir/test/fusion/{pr-e2e,nightly-misc-e2e,resnet50-e2e}/` | Full GPU pipeline |
+| **E2E (smoke)** | top-level `tests.sh`, `test_prefill_changes.sh` | Hand-curated GPU smoke covering gemm/conv/attention/fusion |
 
 ## Lit test patterns
 
@@ -550,40 +515,28 @@ See also: `code-review.md` (Major section) and `dev-workflow.md` (Testing a new 
 
 ## tests.sh smoke suite
 
-`tests.sh` is the canonical end-to-end smoke entry point. It:
-
-1. Detects `$ARCH` and `$NUM_CU` from `rocminfo`
-2. Builds `check-rocmlir-build-only ci-performance-scripts`
-3. Runs gemm/conv/attention/fusion pipelines through `mlir-runner` from `external/triton/llvm-project/build/`
-4. Filters `LIT_FILTER` over targeted lit subdirectories (`fusion/fusability`, `fusion/pr-e2e/`, `Dialect/Rock`, `rocmlir-gen`, `Conversion`, `rocmlir-driver`, `capi`, `rocmlir-tuning-driver`)
+`tests.sh` is the canonical end-to-end smoke entry point. It auto-detects `$ARCH` and `$NUM_CU` from `rocminfo`, builds `check-rocmlir-build-only ci-performance-scripts`, runs gemm/conv/attention/fusion pipelines through `mlir-runner` (from `external/triton/llvm-project/build/`), and filters `LIT_FILTER` over targeted lit subdirectories (`fusion/fusability`, `fusion/pr-e2e/`, `Dialect/Rock`, `rocmlir-gen`, `Conversion`, `rocmlir-driver`, `capi`, `rocmlir-tuning-driver`).
 
 Whenever a new dialect/conversion area is added, update `tests.sh` so the corresponding `LIT_FILTER` line covers it.
 
-## Key substitutions
+## Substitutions and FileCheck options
 
-Defined in `lit.cfg.py` / `lit.site.cfg.py.in` files:
-- `mlir/test/lit.cfg.py` -- main substitutions (`%arch`, `%shlibext`, `%linalg_test_lib_dir`, etc.)
-- E2E and fusion lit configs add suite-specific substitutions
-
-## FileCheck defaults
-
-`FILECHECK_OPTS="-enable-var-scope --allow-unused-prefixes=false"` -- all CHECK prefixes must be used.
+- `lit.cfg.py` / `lit.site.cfg.py.in` define `%arch`, `%shlibext`, `%linalg_test_lib_dir`, etc.; E2E and fusion lit configs add suite-specific extras.
+- `FILECHECK_OPTS="-enable-var-scope --allow-unused-prefixes=false"` -- all CHECK prefixes must be used.
 
 ## Test targets
 
 - `check-rocmlir` -- full suite
 - `check-rocmlir-build-only` -- compile only (used in CI build stage)
-- `MLIRRockUnitTests` -- GoogleTest only (run via `./mlir/unittests/Dialect/Rock/MLIRRockUnitTests`)
-- E2E (PR subset): enable with `-DROCMLIR_DRIVER_PR_E2E_TEST_ENABLED=ON`
-- E2E (full): enable with `-DROCK_E2E_TEST_ENABLED=ON` and `-DROCMLIR_DRIVER_E2E_TEST_ENABLED=ON`
+- `MLIRRockUnitTests` -- GoogleTest (run via `./mlir/unittests/Dialect/Rock/MLIRRockUnitTests`)
+- E2E (PR subset): `-DROCMLIR_DRIVER_PR_E2E_TEST_ENABLED=ON`
+- E2E (full): `-DROCK_E2E_TEST_ENABLED=ON` and `-DROCMLIR_DRIVER_E2E_TEST_ENABLED=ON`
 
 ## Architecture and dtype coverage
 
-- New ops/passes must work on all supported GPU architectures present in CI (`gfx90a`, `gfx942`, `gfx950`, `gfx1100`, etc.)
-- Guard arch-specific ops with target checks in both code and tests; `tests.sh` already gates several `gfx950`-only paths
-- Enumerate all dtypes the op should support (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, etc.)
-- Add E2E tests covering each supported dtype; reject unsupported dtypes with `emitOpError`
-- For scaled GEMM features, ensure `f8E8M0FNU` scale handling works (see `docs/scaled_gemm.md`)
+- New ops/passes must work on every supported GPU arch present in CI (`gfx90a`, `gfx942`, `gfx950`, `gfx1100`, ...). Guard arch-specific ops with target checks in both code and tests; `tests.sh` already gates several `gfx950`-only paths.
+- Enumerate all dtypes the op should support (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, ...). Add E2E tests covering each supported dtype; reject unsupported ones with `emitOpError`.
+- Scaled GEMM features must respect the `f8E8M0FNU` scale convention -- see `docs/scaled_gemm.md`.
 
 ## Fusion test requirements
 
@@ -606,7 +559,9 @@ Attention: `-seq_len_q`, `-seq_len_k`, `-head_dim_qk`, `-head_dim_v`, `-num_head
 
 Scaled GEMM: `-scaledGemm`, `-quantBlockSize`, `-scale_a_dtype`, `-scale_b_dtype`, e.g. `-t f8E4M3FN -scale_a_dtype f8E8M0FNU` (gfx950 only -- see `docs/scaled_gemm.md`)
 
-Features: `-mfma`, `-wmma`, `-dot`, `-atomic_add` (each: `infer`/`on`/`off`)
+Hidden / aliased flags worth knowing (`--help` doesn't list them but they're real): `-pv` (`cl::Hidden`, sets `verifier=mlir` + host harness), `-ph` (alias for `--host-harness`), `-pr` (alias for `--print-results`), `-pi` (alias for `--print-inputs`), `-pvr` (alias for `--print-validation-results`), `-out_datatype` / `-to` / `-tc` / `-c_dtype` (aliases for `--out_dtype`).
+
+Note: this fork of `rocmlir-gen` does **not** accept `-mfma`/`-wmma`/`-dot`/`-atomic_add` as `infer/on/off` flags (they exist in upstream rocMLIR but were removed here). Hardware-feature gating is now driven by `-arch=...` plus optional `--force-f8-types=<arch|nanoo|ocp>`. The `ROCMLIR_GEN_FLAGS` cmake variable still exists as a lit substitution, but only takes flags `rocmlir-gen` actually accepts.
 
 ## rocmlir-driver -- run lowering pipelines
 
@@ -617,6 +572,8 @@ Features: `-mfma`, `-wmma`, `-dot`, `-atomic_add` (each: `infer`/`on`/`off`)
 - `-host-pipeline`: comma list of `migraphx`, `highlevel`, `backend`
 - `-c`: hidden legacy shorthand for `-kernel-pipeline=full` (does **not** set the host pipeline; pair with `-host-pipeline=...` if you also need host lowering)
 - `-arch`, `-dump-pipelines`, `-disable-verify-passes`, `-dump-cpu-schedules=<dir>`
+
+The full compilation arc and how each pipeline maps onto the C++ replicas are documented in `triton-integration.md`.
 
 ## rocmlir-opt -- MLIR optimizer
 
@@ -631,31 +588,23 @@ Useful individual passes for the Rock<->Triton bridge: `--rock-to-ttir`, `--rock
 
 ## rocmlir-translate -- translation entry points
 
-- `--gpu-module-to-rocdir`
-- `--triton-to-hsaco` (the C++ replication of Triton's `make_hsaco`)
+The fork-specific entry point is `--triton-to-hsaco` (the C++ replication of Triton's `make_hsaco`). The remaining options are the standard upstream MLIR translations (`--mlir-to-llvmir`, `--import-llvm`, `--mlir-to-cpp`, `--serialize-spirv`/`--deserialize-spirv`, `--export-smtlib`, `--irdl-to-cpp`, `--import-wasm`). Run `rocmlir-translate --help` for the full list.
 
 ## rocmlir-tuning-driver -- JIT benchmark
 
-`--tuning-space` (`quick`/`full`/`greedy`/`exhaustive`), `--num-iterations`, `--warmup-iterations`, `--sleep-us`, `--use-median`, `--show-all-measurements`
+`--tuning-space` (`quick`/`full`/`exhaustive`), `--num-iterations`, `--warmup-iterations`, `--sleep-us`, `--use-median`, `--show-all-measurements`. For Python orchestration on top of this, see the `tuningrunner-usage` skill.
 
 ## rocmlir-lsp-server
 
 LSP server that registers Rock/MIGraphX dialects for editor integration with `.mlir` files.
 
-## Python performance/tuning scripts (`mlir/utils/performance/`)
+## Python performance/tuning scripts
 
-- `perfRunner.py` -- main benchmark runner (gemm/conv/attention/fusion across configs)
-- `tuningRunner.py` -- tuning orchestrator over perf-config space
-- `parameterSweeps.py` -- parameter sweep driver for exhaustive tuning
-- `attentionSweeps.py` -- attention-specific sweeps
-- `perfRegressionReport.py`, `createPerformanceReports.py`, `createFusionPerformanceReports.py` -- report generators
-- `reportUtils.py`, `perfCommonUtils.py` -- shared utilities
-- `handleNewConfigs.py`, `convertRocBlasToPerfRunner.py` -- config helpers
-- Configs: `configs/tier1-{gemm,conv,attention,gemmgemm}-configs`, `problem-config-tier-1-models`, `bert-configs-raw`
+All under `mlir/utils/performance/`. The two main entry points (`tuningRunner.py`, `perfRunner.py`) have dedicated skills: `tuningrunner-usage`, `perfrunner-usage`. Other helpers (`parameterSweeps.py`, `attentionSweeps.py`, the various report generators) -- run `python3 <script>.py --help`. Configs under `mlir/utils/performance/configs/`.
 
 ## Widgets (`mlir/utils/widgets/`)
 
-- `rocm-run` / `xmir-run` -- shell wrappers around `mlir-runner` with the right `--shared-libs`
+- `rocm-run` / `xmir-run` -- shell wrappers around `mlir-runner` with the right `--shared-libs`. Use these instead of typing the long `mlir-runner --shared-libs=...` invocation by hand.
 
 ## Common pipelines
 
@@ -677,29 +626,7 @@ sed -e "s/gfx1100/$ARCH/g" -e "s/rock.num_cu = 96/rock.num_cu = $NUM_CU/g" fusio
   rocmlir-driver -c | mlir-runner --shared-libs=... --entry-point-result=void
 ```
 
-## Tuning + benchmarking
-
-```bash
-# Tune
-python3 tuningRunner.py --abort-on-error --operation gemm \
-  --configs-file=configs/tier1-gemm-configs --output=mlir_tuning_${CHIP}.tsv
-
-# Benchmark with the tuning DB
-python3 perfRunner.py --op=gemm --batch_all \
-  --configs_file=configs/tier1-gemm-configs \
-  --tuning_db=mlir_tuning_${CHIP}.tsv
-
-# Multi-GPU tuning
-python3 tuningRunner.py --operation gemm --configs-file=configs/tier1-gemm-configs --gpus 0 1 2 3
-```
-
-## Parameter sweeps
-
-```bash
-python3 parameterSweeps.py -j <num_workers> <CONFIG> --log-failures
-```
-
-All Python scripts are in `mlir/utils/performance/`. Run `python3 <script>.py --help` for full flag reference.
+The exact `--shared-libs=` string above is what `tests.sh` uses; the easier alternative for ad-hoc runs is `mlir/utils/widgets/rocm-run`.
 
 
 ---
@@ -713,34 +640,31 @@ All Python scripts are in `mlir/utils/performance/`. Run `python3 <script>.py --
 3. Add lowering in `mlir/lib/Dialect/Rock/Transforms/` using `OpRewritePattern` or `OpConversionPattern`
 4. Register pass in `mlir/include/mlir/Dialect/Rock/Passes.td`
 5. Wire into pipeline in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`
-6. Add Lit tests in `mlir/test/Dialect/Rock/` (round-trip + pass tests)
-7. Update `CMakeLists.txt` if new files added
+6. Add Lit tests in `mlir/test/Dialect/Rock/` (round-trip + pass tests; patterns in `testing-conventions.md`)
+7. Update `CMakeLists.txt` if new files added (helpers in `cmake-conventions.md`)
 
 ## Adding a conversion pass (e.g. FooToBar)
 
 1. Declare in `mlir/include/mlir/Conversion/RocMLIRPasses.td`
 2. Create `mlir/lib/Conversion/FooToBar/` with pattern + pass `.cpp` files
-3. Add `add_rocmlir_conversion_library(...)` in CMakeLists
+3. Add `add_rocmlir_conversion_library(...)` in `CMakeLists.txt`
 4. Add Lit tests in `mlir/test/Conversion/FooToBar/`
 
 ## Touching the Rock <-> Triton bridge
 
-The two passes that translate Rock dialect IR into Triton's `tt` dialect:
+The two bridge passes (`-rock-to-ttir`, `-rock-func-to-triton-func`) and their files are documented in `triton-integration.md`. When extending them:
 
-- `mlir/lib/Dialect/Rock/Transforms/RockToTTIR.cpp` (`-rock-to-ttir`) -- rewrite Rock blockwise/gemm ops to `tt.load`/`tt.store`/`tt.dot`/`tt.reduce`. Add a new `OpRewritePattern` here when you introduce a Rock op that needs to reach the GPU through Triton.
-- `mlir/lib/Dialect/Rock/Transforms/FuncToTritonFunc.cpp` (`-rock-func-to-triton-func`) -- module-level pass that turns `func.func` kernels into `tt.func`, lifts tensor args to `!tt.ptr`, and folds pointer arith into `tt.addptr`. Touch this when the kernel calling convention or pointer-attribute layout changes.
-
-Both are scheduled by `rock::buildKernelPipeline` in `Pipelines.cpp`. After they run, the kernel module body is `tt.func` only.
+- Add a new `OpRewritePattern` in `RockToTTIR.cpp` when you introduce a Rock op that needs to reach the GPU through Triton.
+- Touch `FuncToTritonFunc.cpp` when the kernel calling convention or pointer-attribute layout changes.
 
 ## Touching the Triton-driven pipeline
 
 If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
 
 1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`.
-2. Mirror the change in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` (`makeTTIR`/`makeTTGIR`/`makeLLIR` -- TTIR/TTGIR/LLIR MLIR-side passes) or `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (LLVM IR finalization, AMDGCN, HSACO).
-3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes.
-4. If you need a hardware capability not yet exposed by `rock`, add it to `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` rather than reaching into `triton::AMD::TargetInfo`.
-5. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
+2. Mirror the change in the corresponding C++ replication point (table in `triton-integration.md`).
+3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes; add new helpers in `AmdArchDb.cpp` if needed.
+4. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
 
 ## Adding a MIGraphX operation
 
@@ -750,26 +674,10 @@ If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
 
 ## Testing a new operation or feature
 
-### Architecture coverage
+Architecture coverage, dtype coverage, edge cases, and fusion-test requirements are documented in `testing-conventions.md`. The two key rules:
 
-- New ops/passes must work on all supported GPU architectures (`gfx90a`, `gfx942`, `gfx950`, `gfx1100`, ...)
-- If an op is architecture-specific, guard it with proper target checks in both code and tests
-- Use `lit.cfg.py` to configure arch-specific test guards
-
-### Data type coverage
-
-- Enumerate all dtypes the op should support (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, `i4`, etc.)
-- Ensure the implementation handles each supported dtype explicitly -- do not silently fall through
-- Return a clear error (`emitOpError`) for unsupported dtypes rather than producing wrong results
-- Add E2E tests covering each supported dtype and Lit tests that verify unsupported dtypes are rejected
-- Scaled GEMM features must respect the `f8E8M0FNU` scale convention (see `docs/scaled_gemm.md`)
-
-### Edge cases and completeness
-
-- Consider boundary conditions: zero-size tensors, non-aligned shapes, large dimensions, scalar inputs
-- For optimization passes, verify the optimization fires (FileCheck for expected IR) and verify correctness (E2E with random data)
-- Test both the optimized path and the fallback/unoptimized path
-- If the feature interacts with fusion, test fused and unfused variants and update `tests.sh` if a new top-level `fusion_*_with_host.mlir` is added
+- New ops/passes must work on every supported GPU arch present in CI; arch-specific paths must be guarded in both code and tests.
+- Enumerate all supported dtypes (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, `i4`, ...); reject unsupported ones with `emitOpError`.
 
 ## Debugging a pass failure
 
@@ -802,11 +710,9 @@ rocmlir-opt --rock-func-to-triton-func input.mlir
 
 # Run only the Triton-driven pass pipeline on a tt.func module
 rocmlir-opt --rock-triton-pipeline='arch=gfx942 num-warps=4 ...' tt.mlir
-
-# Compare against upstream Triton's Python pipeline by running a reference
-# kernel through `python -m triton.runtime.compile` (only when Triton's
-# Python module is available; not built by default in this repo)
 ```
+
+For full lowering + GPU validation (incl. the canonical `mlir-runner --shared-libs=...` invocation), use the `mlir/utils/widgets/rocm-run` wrapper or copy the line out of `tests.sh` -- see `rocmlir-tools.md` for the explicit form.
 
 
 ---
@@ -871,22 +777,19 @@ All paths: `@causten` (`.github/CODEOWNERS`).
 
 # Skill Dispatch
 
-Before starting any task, check whether an available skill matches the user's request. Skills are located in `.cursor/skills/*/SKILL.md`. Read the matching skill file and follow its process before doing anything else.
+Before starting any task, check whether an available skill matches the user's request. If a skill matches, read its `SKILL.md` and follow the documented process step by step. Do not improvise a workflow when a skill already defines one.
 
 ## Trigger keywords -> skill mapping
 
-| If the request mentions...                               | Use skill            |
-|----------------------------------------------------------|----------------------|
-| review PR, PR feedback, analyze PR                       | `pr-review`          |
-| build, compile, test, lint, check build, run tests.sh    | `build-test-workflow`|
-| profile, benchmark perf, kernel bottleneck               | `kernel-profiling`   |
-| run benchmarks, perfRunner, performance comparison       | `perfrunner-usage`   |
-| tune, tuning, perfConfig, tuningRunner                   | `tuningrunner-usage` |
-| release branch, cherry-pick, release patch               | `release-management` |
-| bump Triton, update Triton submodule, sync with Triton   | `triton-bump`        |
-| add Triton patch, refresh triton-patches                 | `triton-bump`        |
-
-If a skill matches, read its `SKILL.md` and follow the documented process step by step. Do not improvise a workflow when a skill already defines one.
+| If the request mentions...                                              | Use skill            |
+|-------------------------------------------------------------------------|----------------------|
+| review PR, PR feedback, analyze PR, back-port to rocMLIR                | `pr-review`          |
+| build, compile, test, lint, check build, run tests.sh                   | `build-test-workflow`|
+| profile, benchmark perf, kernel bottleneck                              | `kernel-profiling`   |
+| run benchmarks, perfRunner, performance comparison                      | `perfrunner-usage`   |
+| tune, tuning, perfConfig, tuningRunner                                  | `tuningrunner-usage` |
+| release branch, cherry-pick, release patch                              | `release-management` |
+| bump Triton, update Triton submodule, sync with Triton, add/refresh triton-patch | `triton-bump` |
 
 
 ---
@@ -952,28 +855,7 @@ The canonical entry point is `cmake.sh`, which:
 bash cmake.sh
 ```
 
-### Manual configure (when you need to change options)
-
-```bash
-mkdir -p build && cd build
-cmake -G Ninja .. \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_C_COMPILER=clang-20 \
-  -DCMAKE_CXX_COMPILER=clang++-20 \
-  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
-  -DBUILD_FAT_LIBROCKCOMPILER=ON \
-  -DLLD_BUILD_TOOLS=ON \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DROCK_E2E_TEST_ENABLED=ON \
-  -DROCMLIR_DRIVER_PR_E2E_TEST_ENABLED=ON \
-  -DROCMLIR_DRIVER_E2E_TEST_ENABLED=ON
-ninja libconv-validation-wrappers.so
-ninja check-rocmlir-build-only ci-performance-scripts
-```
-
-To configure against a pre-built MLIR (e.g. shared dev environment), pass `-DMLIR_DIR=/path/to/lib/cmake/mlir` and skip `scripts/build-llvm.sh`.
+To configure against a pre-built MLIR (e.g. a shared dev environment), pass `-DMLIR_DIR=/path/to/lib/cmake/mlir` and skip `scripts/build-llvm.sh`. For one-off configure changes, edit `cmake.sh` rather than reproducing the long `cmake -G Ninja ...` line by hand -- the cmake options it sets (compiler/linker, E2E flags, build type) are the canonical set. The full option list is documented in `cmake-conventions.md`.
 
 Always verify exit codes. If the build fails, stop and report -- do not proceed to test/lint.
 
@@ -995,13 +877,13 @@ cd build && LIT_FILTER=fusion/pr-e2e/ ninja check-rocmlir
 cd build && LIT_FILTER=rocmlir-tuning-driver ninja check-rocmlir
 ```
 
-`tests.sh` auto-detects `$ARCH` and `$NUM_CU` from `rocminfo` and gates `gfx950`-only scaled GEMM cases.
+`tests.sh` auto-detects `$ARCH` and `$NUM_CU` from `rocminfo` and gates `gfx950`-only scaled GEMM cases. See `testing-conventions.md` for the lit suite layout and `tests.sh` smoke contents.
 
 ## Step 3: Lint
 
 - **C++ format**: `git clang-format --diff origin/develop`
-- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge invokes `mlir/utils/jenkins/static-checks/premerge-checks.py` (clang-format + clang-tidy, **only on the `mfma` matrix row**)
-- **Python lint/format**: `flake8 --ignore=E501,E251,E124,W605,W504,E131,E126,W503,E123` + `yapf --diff` on changed `mlir/**/*.py` (see `.github/workflows/ci.yml`); no pytest gate exists yet
+- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge invokes `mlir/utils/jenkins/static-checks/premerge-checks.py` (clang-format + clang-tidy, **only on the `mfma` matrix row** -- see `ci-pipelines.md`)
+- **Python lint/format**: see `python-standards.md` for the canonical commands and ignore list
 
 ## Step 4: Report
 
@@ -1048,7 +930,7 @@ rocminfo | grep gfx
 
 ## Step 1: Generate kernel
 
-The runtime libs come from Triton's LLVM build under `external/triton/llvm-project/build/`:
+The runtime libs come from Triton's LLVM build under `external/triton/llvm-project/build/`. Set `$SHARED_LIBS` once and reuse below; the canonical four-library string is the same one `tests.sh` uses (also documented in `rules/rocmlir-tools.md`):
 
 ```bash
 SHARED_LIBS="external/triton/llvm-project/build/lib/libmlir_rocm_runtime.so,build/lib/libconv-validation-wrappers.so,external/triton/llvm-project/build/lib/libmlir_runner_utils.so,external/triton/llvm-project/build/lib/libmlir_c_runner_utils.so"
@@ -1149,7 +1031,7 @@ Key parameters: `--att-target-cu`, `--att-shader-engine-mask`, `--att-simd-selec
 
 ### Using with rocmlirTriton
 
-Create a `run.sh` with full absolute paths:
+Create a `run.sh` with full absolute paths. `mlir/utils/widgets/rocm-run` is the canonical wrapper for `mlir-runner` -- prefer it over typing the long `--shared-libs=...` line.
 
 ```bash
 #!/bin/bash
@@ -1228,8 +1110,8 @@ ROCR_VISIBLE_DEVICES=0 python3 perfRunner.py --op gemm --batch_all -c <configs> 
 Tune first with `tuningRunner.py` (see `skills/tuningrunner-usage/SKILL.md`), then benchmark with the tuning database:
 
 ```bash
-# 1. Tune configs
-python3 tuningRunner.py --operation gemm --configs-file <configs> --output mlir_tuning.tsv
+# 1. Tune configs (note: --configs_file uses an underscore, not a dash)
+python3 tuningRunner.py --operation gemm --configs_file <configs> --output mlir_tuning.tsv
 
 # 2. Benchmark with tuning DB
 python3 perfRunner.py --op gemm --batch_all -c <configs> -t mlir_tuning.tsv
@@ -1265,9 +1147,9 @@ ls build/bin/ck-gemm-benchmark-driver
 ```bash
 cmake ... -DROCMLIR_ENABLE_BENCHMARKS=hipblaslt   # or 'ck' or 'all'
 ninja ci-performance-scripts hipblaslt-benchmark-driver
-# For CK baseline:
+# For CK baseline (target name uses '-gemm-', source dir is `ck-benchmark-driver/`):
 # cmake ... -DROCMLIR_ENABLE_BENCHMARKS=ck
-# ninja ci-performance-scripts ck-benchmark-driver
+# ninja ci-performance-scripts ck-gemm-benchmark-driver
 ```
 
 After modifying `perfRunner.py`, rebuild with `ninja ci-performance-scripts` to update the installed copy in the build directory.
@@ -1309,26 +1191,21 @@ Use `git show pr-<number>:<filepath>` to read files at their PR-branch state wit
 
 ### 2. Check CI status
 
-Flag any failing checks (see the `ci-pipelines` rule for the full picture):
-
-- GitHub Actions: `Python Lint and Format Check` (flake8 + yapf on changed `mlir/**/*.py` only; nothing else runs in GHA)
-- Azure Pipelines: ROCm CI via `rocMLIR.yml@pipelines_repo`
-- Jenkins: PR pipeline only (matrix over `vanilla, mfma, navi21, navi3x, navi4x, gfx950`); per row runs `bash cmake.sh` -> `premerge-checks.py` (clang-format/tidy, **only on `mfma` codepath**) -> `bash tests.sh`. Nightly/weekly are currently commented out.
+Flag any failing checks. Per-check details, file paths, and what each gate looks at live in `ci-pipelines.md`. Quick summary: GitHub Actions (Python lint only), Azure (`rocMLIR.yml`), Jenkins PR matrix (clang-format/tidy on `mfma` row only).
 
 ### 3. Review changed files
 
-Read all changed files. Apply checklists from:
-- `rules/code-review.mdc` -- coding standards, LLVM conventions, review severity levels
-- `rules/llvm-cpp-standards.mdc` -- rocmlirTriton-specific C++ patterns and idioms
-- `rules/cmake-conventions.mdc` -- CMake helper functions, MLIR_DIR resolution, options
-- `rules/testing-conventions.mdc` -- Lit test patterns, `tests.sh` smoke suite, fusion test requirements
-- `rules/dev-workflow.mdc` -- testing requirements for new ops/features (arch, dtype, edge cases)
-- `rules/triton-integration.mdc` -- Triton submodule, LLVM build flow, replication points
+Read all changed files. Apply the existing checklists -- don't re-derive them:
 
-**Critical**: unreleased HW references, exceptions, RTTI, `#include <iostream>`, `using namespace std`, static ctors, committed temp files, breaking IR changes, direct edits to `external/triton/` (must be `triton-patches/*.patch` instead)
-**Major**: naming, verifiers, tests, error handling, memory safety, license headers, CMake updates, missing `rock::*` hardware-feature wrappers when calling Triton APIs
-**Major (logic)**: redundant/dead code, unnecessarily complex algorithms, opportunities for simplification (e.g., replace loops with LLVM algorithms, merge redundant conditions, reduce nesting). Prefer upstream LLVM/MLIR/Triton functionality over custom implementations -- flag cases where an existing utility, pass, or API could replace custom code
-**Minor**: include order, comments, early returns, braces, preincrement, trailing whitespace
+- `code-review.md` -- coding standards, severity tiers (Critical / Major / Minor), license headers, decision tiers for `external/triton/` patches
+- `llvm-cpp-standards.md` -- C++ patterns (debug macros, namespaces, naming, `.editorconfig`)
+- `cmake-conventions.md` -- CMake helpers, `external/triton/` style, dialect/tablegen idiom
+- `testing-conventions.md` -- lit patterns, `tests.sh` requirements, fusion-test rules, arch/dtype coverage
+- `dev-workflow.md` -- adding ops/passes, bridge-pass touch points
+- `triton-integration.md` -- bridge passes, replication points, hardware-feature-detection rule, `librockcompiler_deps.cmake` policy
+- `project-overview.md` -- confidentiality / unreleased-HW policy
+
+In the report, cite which severity (Critical/Major/Minor from `code-review.md`) applies. Add a **Major (logic)** flag for: redundant/dead code, unnecessarily complex algorithms, opportunities to replace custom code with an existing LLVM/MLIR/Triton utility, opportunities for simplification (e.g. replace loops with LLVM algorithms, merge redundant conditions, reduce nesting).
 
 ### 4. Triton-specific concerns
 
@@ -1336,18 +1213,35 @@ Read all changed files. Apply checklists from:
   - Updated `Pipelines.cpp` / `TritonToHsaco.cpp` / `tritonUtils.cpp` / `AmdArchDb.cpp` if upstream changed those files
   - `triton-patches/*.patch` re-evaluated; obsolete patches removed
   - `librockcompiler_deps.cmake` regenerated
-- Any new pass call that depends on hardware features must use a `rock::*` helper, not `triton::AMD::TargetInfo` directly
+- Any new pass call that depends on hardware features must use a `rock::*` helper (see `triton-integration.md`)
 - New `triton-patches/*.patch` must include a justification in the PR description (link to upstream issue/PR if applicable)
 
 ### 5. Other project-specific concerns
 
-- License headers on new files (SPDX `Apache-2.0 WITH LLVM-exception`)
+- License headers on new files (template in `code-review.md`)
 - `librockcompiler_deps.cmake` updated if dependencies change
 - Downstream MIGraphX impact for IR/API changes
 - New top-level `fusion_*_with_host.mlir` covered by `tests.sh`
 - Release branch PRs: also apply release patch checklist (see `skills/release-management/SKILL.md`)
 
-### 6. Report
+### 6. rocMLIR back-port check
+
+`rocmlirTriton` was forked from `rocMLIR` and most of `mlir/` is still shared between the two trees. For every change that isn't Triton-submodule-only, ask: **"does this fix/feature also need to land in `ROCm/rocMLIR`?"**
+
+Likely needs a back-port (shared with rocMLIR):
+- `mlir/lib/Dialect/Rock/` (except `RockToTTIR` / `RockFuncToTritonFunc` / `RockSerializeHostFuncs` / `RockRestoreHostCode`), `mlir/lib/Dialect/MIGraphX/`, `mlir/lib/Conversion/MIGraphXTo*/`, `mlir/lib/Analysis/`
+- `mlir/tools/{rocmlir-gen,rocmlir-driver,rocmlir-opt,rocmlir-tuning-driver,rocmlir-lsp-server}/` (excluding any Triton-pipeline registrations)
+- `mlir/utils/performance/`, `mlir/utils/jenkins/static-checks/`
+- Generic `cmake/` helpers and root CMake options that aren't Triton-specific
+
+rocmlirTriton-only (no back-port needed):
+- `external/triton/`, `triton-patches/`, `cmake/triton.cmake`, `scripts/build-llvm.sh`, `cmake.sh`
+- `RockToTTIRPass`, `RockFuncToTritonFuncPass`, `TritonToHsacoPass`, the Triton portion of `rock::buildTritonPipeline` / `buildBackendPipeline` in `Pipelines.cpp`, `tritonUtils.cpp`
+- `librockcompiler_deps.cmake`, `docs/bump_triton_version.md`, `skills/triton-bump/`, `Jenkinsfile.downstream` (deprecated)
+
+If the change touches shared territory, the PR description should either (a) link to a parallel `ROCm/rocMLIR` PR, (b) include a one-line note explaining why the divergence is intentional, or (c) confirm the file no longer exists / has been refactored on the rocMLIR side. Flag any missing back-port in the report so it's not silently lost.
+
+### 7. Report
 
 ```markdown
 ## PR Review: <title>
@@ -1374,6 +1268,9 @@ Read all changed files. Apply checklists from:
 
 ### Triton Sync Notes
 <List or "Not applicable">
+
+### rocMLIR Back-port
+<List shared paths that need a parallel rocMLIR PR, or "Not applicable">
 
 ### Recommendations
 <Suggestions>
@@ -1432,221 +1329,129 @@ Release patches must pass Jenkins PR CI and (when re-enabled) nightly CI, and re
 
 # Triton Bump
 
-`external/triton/` is a **git submodule** of `triton-lang/triton`. Several Triton Python pipelines and helpers are replicated in C++ inside `mlir/`. Whenever the submodule advances, those replicas must be re-synced.
+## Canonical reference
 
-The full reference is `docs/bump_triton_version.md` -- read it once before starting and keep it open during the bump.
+**`docs/bump_triton_version.md`** in the rocmlirTriton repo is the source of truth. It is a 10-step guide with mapping tables, "Features intentionally NOT implemented" list, pass-interface-change recipes, troubleshooting, and a per-step progress checklist. **Read it end-to-end and follow it step by step**; this skill only adds the project conventions the doc doesn't cover (branch naming, PR-description checklist, between-bumps patch workflow).
 
-## Workflow
+The replication-point table (Python source → C++ destination) is also summarised in `rules/triton-integration.md`; the canonical fully-detailed table is in section 5 of the doc.
 
-### 1. Create the bump branch
+## Project conventions on top of the doc
+
+### 1. Bump branch
+
+Create a dedicated bump branch off `develop` before doing any of the doc's steps:
 
 ```bash
-git checkout develop
-git pull origin develop
+git checkout develop && git pull origin develop
 git checkout -b triton-bump-<month>-<year>     # or triton-bump-<short-sha>
 ```
 
-### 2. Record the old commit and update the submodule
+Every commit on this branch should use the `[TRITON-BUMP]` prefix (or `[TRITON-PATCH]` for a single patch update -- see below).
 
-```bash
-cd external/triton
-export OLD_COMMIT=$(git rev-parse HEAD)
-git fetch
-git checkout <new-target-sha>                  # or `git pull` to track upstream main
-export NEW_COMMIT=$(git rev-parse HEAD)
-cd ../..
-git add external/triton
-```
+### 2. Sync each C++ replica as a separate commit
 
-### 3. Rebuild LLVM via the wrapper
-
-The Triton submodule pins LLVM through `external/triton/cmake/llvm-hash.txt`; bumping Triton may bump LLVM too.
-
-```bash
-bash scripts/build-llvm.sh
-```
-
-This wrapper:
-1. Initializes submodules (recursive)
-2. Applies every `triton-patches/*.patch` to `external/triton/` (idempotent)
-3. Forces `MLIR_ENABLE_ROCM_RUNNER=ON` in Triton's build script
-4. Runs Triton's `scripts/build-llvm-project.sh`
-
-If a patch fails to apply, see step 4.
-
-### 4. Re-evaluate `triton-patches/`
-
-For each patch in `triton-patches/`:
-
-```bash
-cd external/triton
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- <files-touched-by-patch>
-```
-
-- If the upstream change already covers what the patch did, **delete the patch file**
-- If the patch still applies cleanly, leave it
-- If the patch conflicts, rebase it manually and update the file (commit with `[TRITON-PATCH] ...`)
-
-### 5. Diff the replication-source files
-
-```bash
-cd external/triton
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/backend/compiler.py > /tmp/compiler.py.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- python/src/llvm.cc > /tmp/llvm.cc.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/python/triton_amd.cc > /tmp/triton_amd.cc.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/lib/TritonAMDGPUTransforms/AccelerateAMDMatmul.cpp > /tmp/AccelerateAMDMatmul.cpp.diff
-git diff ${OLD_COMMIT}..${NEW_COMMIT} -- third_party/amd/include/TritonAMDGPUToLLVM/TargetUtils.h > /tmp/TargetUtils.h.diff
-cd ../..
-```
-
-### 6. Sync the C++ replicas
-
-| Triton (Python / C++) | rocmlirTriton (C++) |
-|-----------------------|---------------------|
-| `make_ttir`, `make_ttgir`, `make_llir` part 1 | `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` |
-| `make_llir` part 2, `make_amdgcn`, `make_hsaco` | `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` |
-| `init_targets`, `createTargetMachine`, `optimize_module` (`llvm.cc`) | `TritonToHsaco.cpp` (`initializeLLVMTargets`, `createTargetMachine`, `optimizeModule`) |
-| `getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaledElemType` (`AccelerateAMDMatmul.cpp`) | `mlir/lib/Dialect/Rock/utility/tritonUtils.cpp` (`mlirTypeToScaleDotElemType` extends BF16/FP16) |
-| `triton_amd.cc` Python pass bindings | corresponding `pm->addPass(...)` in `Pipelines.cpp` |
-| `ISAFamily` / hardware capabilities | `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` |
-
-For each diff, mirror the change in the corresponding C++ file. Notes:
-
-- New pass added in Python -> find C++ creation in `triton_amd.cc`, add the `pm->addPass(...)` call, include the relevant Triton header
-- Pass signature changed -> update the call site to match (check `external/triton/third_party/amd/include/TritonAMDGPUTransforms/Passes.h`)
-- New `ISAFamily` value -> update every switch in `AmdArchDb.cpp` (`getMatrixAccelKind`, `isFastAtomicAddSupported`, `isFastAtomicMaxSupported`, `getMaxNumChiplets`, `getMinNumCU`, `getMaxWavesPerEU`, etc.) and confirm `tritonUtils.cpp::getMfmaVersion`/`getWmmaVersion` handle the new chip
-- Hardware feature gates in Python -> use `rock::*` helpers in C++ (`rock::supportsTDM(arch)`), adding new helpers in `AmdArchDb.cpp` if needed
-- Skip features intentionally NOT replicated (see `rules/triton-integration.md`): `instrumentation.patch`, `knobs.*`, `add_di_scope`, `translate_to_mir`, `dump_sched_dag`, `swap_mir`, `dump_ir_*`, FPSan, `schedule_hint` loop processing
-
-Commit each fix separately with a descriptive message:
+Each fix in the doc's Step 5 should be a separate commit so reviewers can audit them individually:
 
 ```
 Sync <change>. Caused by https://github.com/triton-lang/triton/pull/NNNNN
 ```
 
-### 7. Build and fix breakage
+### 3. Local Triton patches between bumps
+
+`docs/bump_triton_version.md` covers re-evaluating existing patches during a bump (its Step 3). When you need to **add** a new local patch *between* bumps, follow:
 
 ```bash
-bash cmake.sh
+cd external/triton
+# ... edit files ...
+git diff > ../../triton-patches/<NN-name>.patch
+git checkout .                  # leave the submodule clean
+cd ../..
+git add triton-patches/<NN-name>.patch
+git commit -m "[TRITON-PATCH] <description>"
 ```
 
-Resolve compilation errors; expect some from upstream LLVM API changes that came in with the LLVM bump.
+The wrapper `scripts/build-llvm.sh` applies patches in lexicographic order, so prefix with a number if ordering matters. The patch must be:
 
-### 8. Regenerate `librockcompiler_deps.cmake`
+- Idempotent (`scripts/build-llvm.sh` checks via `git apply --check --reverse`)
+- Justified in the commit message
+- Either upstreamed or carry a comment explaining why it's a permanent fork (see "Decision tier" in `rules/code-review.md`)
 
-A bump can add or remove libraries baked into `librockCompiler.a`:
+### 4. PR description checklist
 
-```bash
-cd build
-perl ../mlir/utils/jenkins/static-checks/get_fat_library_deps_list.pl \
-  > ../mlir/tools/rocmlir-lib/librockcompiler_deps.cmake
-cd ..
-git add mlir/tools/rocmlir-lib/librockcompiler_deps.cmake
-```
-
-### 9. Run tests
-
-```bash
-bash tests.sh
-```
-
-If new top-level `fusion_*_with_host.mlir` files are added during the bump, also include them in `tests.sh`.
-
-### 10. Open the PR with the bump checklist
-
-PR description must include the bump checklist (lifted from `docs/bump_triton_version.md`):
+When opening the bump PR, paste this checklist into the PR body so reviewers can sign off line-by-line. (This is the **PR-facing** checklist; the doc's Section "Checklist Summary" is the agent's progress checklist while doing the work.)
 
 ```markdown
 ### Triton Bump Checklist
 
 - [ ] Submodule updated from `OLD_COMMIT` to `NEW_COMMIT`
 - [ ] LLVM rebuilt via `scripts/build-llvm.sh`
-- [ ] `triton-patches/` re-evaluated; obsolete patches removed
-- [ ] Diffed `compiler.py`, `llvm.cc`, `triton_amd.cc`, `AccelerateAMDMatmul.cpp`, `TargetUtils.h`
-- [ ] `Pipelines.cpp` synced (`make_ttir`, `make_ttgir`, `make_llir` part 1)
-- [ ] `TritonToHsaco.cpp` synced (`make_llir` part 2 + LLVM helpers)
-- [ ] `tritonUtils.cpp` synced (`getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaleDotElemType`)
-- [ ] `AmdArchDb.cpp` updated for any new `ISAFamily`
-- [ ] `librockcompiler_deps.cmake` regenerated
-- [ ] `cmake.sh` build succeeds
-- [ ] `tests.sh` passes
+- [ ] `triton-patches/` re-evaluated; obsolete patches removed (doc Step 3)
+- [ ] Diffed `compiler.py`, `llvm.cc`, `triton_amd.cc`, `AccelerateAMDMatmul.cpp`, `TargetUtils.h` (doc Step 4)
+- [ ] `Pipelines.cpp` synced (`make_ttir`, `make_ttgir`, `make_llir` part 1) (doc 5.1)
+- [ ] `TritonToHsaco.cpp` synced (`make_llir` part 2 + LLVM helpers) (doc 5.3)
+- [ ] `tritonUtils.cpp` synced (`getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaleDotElemType`) (doc 5.4)
+- [ ] `AmdArchDb.cpp` updated for any new `ISAFamily` (doc 5.5)
+- [ ] `librockcompiler_deps.cmake` regenerated (doc Step 9)
+- [ ] `cmake.sh` build succeeds (doc Step 8)
+- [ ] `tests.sh` passes (doc Step 10)
 - [ ] MIGraphX integration check (notify MIGraphX team if downstream impact)
 ```
 
-## Common failure patterns
+## When to deviate from the doc
 
-- **Missing pass**: new pass call in `compiler.py` -> find binding in `triton_amd.cc` and add C++ call
-- **Pass signature change**: check the new signature in `external/triton/third_party/amd/include/TritonAMDGPUTransforms/Passes.h`
-- **`ISAFamily` switch warnings**: `default:` case silently returned a fallback -- audit every `switch` in `AmdArchDb.cpp` and `tritonUtils.cpp`
-- **Test failures**: behavioral change upstream -- update the test expectation only after confirming the new behavior is intended
-- **Header errors**: mirror the includes from `triton_amd.cc` or other Triton files; CMake propagates Triton's include dirs through the helper functions in `cmake/triton.cmake`
-
-## Local Triton patches (between bumps)
-
-For targeted Triton fixes that cannot wait for upstream, add a new `triton-patches/<name>.patch` file:
-
-```bash
-cd external/triton
-# ... edit files ...
-git diff > ../../triton-patches/<name>.patch
-git checkout .          # leave the submodule clean
-cd ../..
-git add triton-patches/<name>.patch
-git commit -m "[TRITON-PATCH] <description>"
-```
-
-The wrapper applies patches in lexicographic order (`*.patch`), so prefix with a number if ordering matters.
+If you find a step in `docs/bump_triton_version.md` that is wrong or out of date during a bump, fix the doc in the same PR (or a follow-up `[NFC]` PR) -- don't fork the procedure into this skill.
 
 ---
 
 # tuningRunner.py Usage
 
-Source: `mlir/utils/performance/tuningRunner.py`. After tuning, use the output DB with `perfRunner.py` for benchmarking (see `skills/perfrunner-usage/SKILL.md`).
+Source: `mlir/utils/performance/tuningRunner.py`. After tuning, use the output TSV with `perfRunner.py` for benchmarking (see `skills/perfrunner-usage/SKILL.md`). Run `python3 tuningRunner.py --help` for the up-to-date flag reference.
 
-**Important**: Ensure no other processes are using the GPUs during tuning or benchmarking. Shared GPU usage causes noisy and unreliable results. Check with `rocm-smi` or `fuser /dev/kfd` before starting. Use `--gpus` to target specific GPUs:
+**Important**: Ensure no other processes are using the GPU during tuning. Shared GPU usage causes noisy and unreliable results. Check with `rocm-smi` or `fuser /dev/kfd` before starting. To pin tuning to a specific GPU, use `ROCR_VISIBLE_DEVICES`/`HIP_VISIBLE_DEVICES` -- the script itself has no `--gpus` flag and is single-GPU per invocation:
 
 ```bash
-python3 tuningRunner.py --op gemm -c <configs> --gpus 0
+ROCR_VISIBLE_DEVICES=0 python3 tuningRunner.py --op gemm -c <configs>
 ```
 
-## Config source (exactly one required)
+## Config source
 
-- `-c` / `--configs-file` -- file of configs (use `-` for stdin)
-- `--config` -- single config string or `.mlir` file path
-- `--test-dir` -- fusion E2E test directory (requires `--op fusion`)
+- `-c` / `--configs_file` -- file of configurations (default: `mlir/utils/jenkins/performance/configs/tier1-conv-configs`)
+- `--config <STR ...>` -- one or more inline config strings to test instead of a file (`nargs='*'`)
+- `--test_dir` -- fusion E2E tests directory (default: `../mlir/test/fusion/resnet50-e2e`); used when `--op fusion`
 
-## Required flag
+## Operation
 
-`--op`: `conv`, `gemm`, `fusion`, `attention`, `gemm_gemm`, `conv_gemm`
+`--op` / `--operation`: `conv` (default), `gemm`, `fusion`, `attention`, `gemm_gemm`, `conv_gemm`
 
-## Key flags
+## Key flags (from `tuningRunner.py --help`)
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `-o` / `--output` | `tuning_results_local.tsv` | Output TSV (or `-` for stdout) |
+| `-o` / `--output` | `tuning_results_local.tsv` | Output TSV (appends to existing file) |
+| `--mlir-build-dir` | auto (`find_mlir_build_dir`) | rocmlirTriton build dir |
+| `--rocmlir_gen_flags` | unset | Extra flags forwarded to `rocmlir-gen` (note: underscore, not dash) |
 | `--tuning-space` | `full` | `quick`, `full`, `greedy`, `exhaustive` |
-| `--verify-mode` | `gpu` | `none`, `cpu`, `gpu` |
-| `--verify-perf-configs` | off | Verify each perf config, not just the winner |
-| `--gpus` | all | Select GPU IDs for parallel tuning |
-| `--num-cpus` | auto | Max CPU threads for compilation |
-| `--data-type` | `f32 f16 i8` | Force data types (gemm only): `f32`, `f16`, `bf16`, `i8`, `fp8`, `f4E2M1FN`, etc. |
-| `--scale-type` | none | Force scale types for scaled gemm: `f32`, `f8E8M0FNU` |
-| `--rocmlir-gen-flags` | none | Extra flags to pass to `rocmlir-gen` |
-| `--retune` | off | Ignore existing rows, retune all |
-| `--retry` | none | Retry: `failed`, `timed_out`, `crashed` |
-| `--timeout` | none | Per-config timeout (seconds) |
+| `--disable-verify-winning-config` / `--no-disable-verify-winning-config` | `False` | When set, skip CPU-reference verification of the winning config (`rocmlir-gen -pv`) |
+| `--verify-all-perfconfigs` | off | Compile and verify *every* applicable perf-config, not just the winner. Incompatible with `--disable-verify-winning-config=True` |
+| `--data-type` | `f32 f16 i8` | Force a set of dtypes. Choices: `f32`, `f16`, `bf16`, `i8`, `i8_i32`, `i8_i8`, `fp8`, `fp8_f32`, `fp8_fp8`, `f4E2M1FN` |
+| `--scale-type` | unset | Force scale types for scaled GEMM (`-scaledGemm` configs only): `f32`, `f8E8M0FNU` |
+| `--tflops` | off | Append a `TFlops` column to the output TSV |
+| `--compact-print` | off | Print info only when the winning config changes |
 | `--abort-on-error` | off | Abort tuning on first error (used in CI) |
-| `--wait-for-compiles` | off | Wait for all compilations before tuning (useful for APUs) |
-| `-s` / `--status` | off | Print pending count, no tuning |
-| `-d` / `-v` / `-q` | normal | Debug / verbose / quiet logging |
+| `--debug` / `-d` | off | Verbose debug output; also writes a `{output}.debug` TSV |
+| `--quiet` / `-q` | off | Quiet mode (suppress per-test output) |
+
+There is **no** `--gpus`, `--num-cpus`, `--retune`, `--retry`, `--timeout`, `--wait-for-compiles`, `--status`/`-s`, `-v`, or `--verify-mode` flag. The previous version of this skill listed several of those; they were never implemented in this fork.
 
 ## Output TSV format
 
+Header columns (printed once at the top of `--output`):
+
 ```
-# arch	numCUs	numChiplets	testVector	perfConfig	TFlops	tuningSpace	commitId	timestamp	durationSec
+# arch    numCUs    numChiplets    testVector    perfConfig (<tuning-space>)
 ```
 
-State file: `{output}.state` JSON tracks failed/timed_out/crashed for recovery.
+`<tuning-space>` is the value passed to `--tuning-space` (e.g. `perfConfig (quick)`). When `--tflops` is set, an additional `TFlops` column is appended. When `--debug` is set, a parallel `{output}.debug` TSV records every tested perf-config (not just winners).
 
 ## Examples
 
@@ -1654,7 +1459,7 @@ State file: `{output}.state` JSON tracks failed/timed_out/crashed for recovery.
 python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs -o tuning_db.tsv
 python3 tuningRunner.py --op gemm --config "-g 3 -m 1024 -k 769 -n 512 -t f32"
 python3 tuningRunner.py --op conv -c configs/tier1-conv-configs --tuning-space quick
-python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs --gpus 2 3
-python3 tuningRunner.py --op fusion --test-dir ../mlir/test/fusion/resnet50-e2e
-cat configs.txt | python3 tuningRunner.py --op gemm -c - -o db.tsv
+python3 tuningRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e
+python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs --tflops --abort-on-error
+ROCR_VISIBLE_DEVICES=2 python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs -o gpu2.tsv
 ```
