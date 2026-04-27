@@ -12,6 +12,22 @@
 
 rocmlirTriton is a fork/derivative of [rocMLIR](https://github.com/ROCm/rocMLIR) that lowers Rock dialect kernels (convolution, GEMM, attention, fused ops) through [OpenAI Triton](https://github.com/triton-lang/triton)'s TTIR/TTGIR/LLIR pipeline to AMD GPU code. It targets AMD hardware (ROCm).
 
+## Compilation arc
+
+```
+TOSA / MIGraphX
+    -> highlevel  (Linalg + Rock view-to-transform, fold-broadcast, ...)
+    -> Rock dialect (rock.gemm/conv/attention -> rock.gridwise -> rock.blockwise -> ptr arith)
+    -> RockToTTIRPass + RockFuncToTritonFuncPass   <-- bridge into the Triton (`tt`) dialect
+    -> Triton IR (TTIR)         via makeTTIR
+    -> TritonGPU IR (TTGIR)     via makeTTGIR
+    -> LLVM IR                  via makeLLIR
+    -> AMDGCN -> HSACO          via TritonToHsacoPass
+    -> Host glue (gpu.launch_func + LLVM lowering) via RestoreHostCode + buildHostLoweringPipeline
+```
+
+The four rocmlir-driver pipelines that drive this are `rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline` (see `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`). Most of the Triton-side stages (`makeTTIR`/`makeTTGIR`/`makeLLIR`, `TritonToHsacoPass`) are C++ replicas of upstream Triton's Python `compiler.py`.
+
 ## Key facts
 
 - Public repository on [ROCm/rocmlirTriton](https://github.com/ROCm/rocmlirTriton)
@@ -88,18 +104,34 @@ rocmlirTriton depends on upstream [Triton](https://github.com/triton-lang/triton
 
 Never modify `external/triton/` directly without a corresponding `.patch` file -- the submodule is checked out fresh on every build.
 
+## Rock <-> Triton dialect bridge
+
+The two passes that hand the IR off from the Rock dialect to Triton's `tt` dialect are owned entirely by us (no upstream counterpart):
+
+| Pass | File | Role |
+|------|------|------|
+| `RockToTTIRPass` (`-rock-to-ttir`) | `mlir/lib/Dialect/Rock/Transforms/RockToTTIR.cpp` | Rewrite `rock.blockwise_*`, `rock.gemm`, `rock.reduce`, ... into `tt.load`/`tt.store`/`tt.dot`/`tt.reduce`. |
+| `RockFuncToTritonFuncPass` (`-rock-func-to-triton-func`) | `mlir/lib/Dialect/Rock/Transforms/FuncToTritonFunc.cpp` | Convert `func.func` kernels to `tt.func`, lift tensor args to `!tt.ptr`, and fold `arith.addi`-on-pointers into `tt.addptr`. |
+| `RockSerializeHostFuncsPass` / `RockRestoreHostCodePass` | `Transforms/SerializeHostFuncs.cpp`, `Transforms/RestoreHostCode.cpp` | Park host functions before the Triton-only stages and restore them afterwards as `gpu.launch_func`. |
+
+Both bridge passes are scheduled by `rock::buildKernelPipeline`. After they run, the module body is `tt.func` only, and the Triton C++ pipeline (next section) takes over.
+
 ## Python-to-C++ replication points
 
-These C++ files mirror Triton Python logic. Whenever the submodule advances, audit them against upstream (see the `triton-bump` skill):
+These C++ functions/files mirror Triton Python logic. Whenever the submodule advances, audit them against upstream (see the `triton-bump` skill):
 
 | Triton (Python / C++) | rocmlirTriton (C++) |
 |-----------------------|---------------------|
-| `make_ttir`, `make_ttgir`, `make_llir` part 1 (`compiler.py`) | `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` |
-| `make_llir` part 2, `make_amdgcn`, `make_hsaco` (`compiler.py`) | `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` |
+| `make_ttir` (`amd/backend/compiler.py`) | `makeTTIR()` in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` |
+| `make_ttgir` (`amd/backend/compiler.py`) | `makeTTGIR()` in `Pipelines.cpp` |
+| `make_llir` part 1 (MLIR-side passes) | `makeLLIR()` in `Pipelines.cpp` (registered as the `rock-triton-pipeline`) |
+| `make_llir` part 2 (LLVM IR finalization), `make_amdgcn`, `make_hsaco` | `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (`TritonToHsacoPass`) |
 | `init_targets`, `createTargetMachine`, `optimize_module` (`llvm.cc`) | `TritonToHsaco.cpp` |
 | `getMfmaVersion`, `getWmmaVersion`, `mlirTypeToScaledElemType` (`AccelerateAMDMatmul.cpp`) | `mlir/lib/Dialect/Rock/utility/tritonUtils.cpp` |
 | `ISAFamily`, hardware feature checks (`TargetUtils.h`) | `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` |
-| `triton_amd.cc` Python pass bindings | corresponding `pm->addPass(...)` in `Pipelines.cpp` |
+| `triton_amd.cc` Python pass bindings | corresponding `pm->addPass(...)` calls in `Pipelines.cpp` |
+
+The four pass-pipeline registrations exposed to `rocmlir-opt` (`rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline`) live at the bottom of `Pipelines.cpp`. `rocmlir-driver`'s `-kernel-pipeline=` keywords (`migraphx`, `highlevel`, `gpu`, `triton`, `binary`, `full`) map onto these.
 
 ## Hardware feature detection
 
@@ -469,14 +501,24 @@ Features: `-mfma`, `-wmma`, `-dot`, `-atomic_add` (each: `infer`/`on`/`off`)
 
 ## rocmlir-driver -- run lowering pipelines
 
-- `-kernel-pipeline`: `applicability`, `migraphx`, `highlevel`, `gpu`, `rocdl`, `binary`, `full` (`gpu,binary`)
-- `-host-pipeline`: `migraphx`, `highlevel`, `runner` (mhal is currently disabled)
-- `-c`: shorthand for `-kernel-pipeline=full -host-pipeline=runner`
-- `-targets`, `-verify-passes`, `-dump-pipelines`
+- `-kernel-pipeline`: comma list of `migraphx`, `highlevel`, `gpu`, `triton`, `binary`, or `full` (= `gpu,triton,binary`)
+  - `gpu` runs `rock::buildKernelPipeline` (Rock -> RockToTTIR -> tt.func)
+  - `triton` runs `rock::buildTritonPipeline` (TTIR -> TTGIR -> LLVM dialect, replicating Triton's `make_ttir`/`make_ttgir`/`make_llir`)
+  - `binary` runs `rock::buildBackendPipeline` (`TritonToHsacoPass` + host glue via `RockRestoreHostCode` + `buildHostLoweringPipeline`)
+- `-host-pipeline`: comma list of `migraphx`, `highlevel`, `backend`
+- `-c`: hidden legacy shorthand for `-kernel-pipeline=full` (does **not** set the host pipeline; pair with `-host-pipeline=...` if you also need host lowering)
+- `-arch`, `-dump-pipelines`, `-disable-verify-passes`, `-dump-cpu-schedules=<dir>`
 
 ## rocmlir-opt -- MLIR optimizer
 
-Standard `mlir-opt` interface with all Rock + MIGraphX + Triton-related passes registered via `InitRocMLIRPasses.h`.
+Standard `mlir-opt` interface with all Rock + MIGraphX + Triton-related passes registered via `InitRocMLIRPasses.h`. Useful pipeline names registered through `rock::registerPipelines()`:
+
+- `--rock-highlevel-pipeline`
+- `--rock-kernel-pipeline` (ends in `tt.func`)
+- `--rock-triton-pipeline` (TTIR -> TTGIR -> LLIR)
+- `--rock-backend-pipeline` (LLVM IR -> HSACO + host lowering)
+
+Useful individual passes for the Rock<->Triton bridge: `--rock-to-ttir`, `--rock-func-to-triton-func`, `--rock-serialize-host-funcs`, `--rock-restore-host-code`, `--triton-to-hsaco`.
 
 ## rocmlir-translate -- translation entry points
 
@@ -572,15 +614,24 @@ All Python scripts are in `mlir/utils/performance/`. Run `python3 <script>.py --
 3. Add `add_rocmlir_conversion_library(...)` in CMakeLists
 4. Add Lit tests in `mlir/test/Conversion/FooToBar/`
 
-## Touching the Triton-side pipeline
+## Touching the Rock <-> Triton bridge
 
-If your change crosses into the Triton-driven part of the pipeline:
+The two passes that translate Rock dialect IR into Triton's `tt` dialect:
 
-1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`
-2. Mirror the change in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` (TTIR/TTGIR/LLIR-part-1) or `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (LLIR-part-2 + amdgcn + hsaco)
-3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes
-4. If you need a hardware capability not yet exposed by `rock`, add it to `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` rather than reaching into `triton::AMD::TargetInfo`
-5. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable
+- `mlir/lib/Dialect/Rock/Transforms/RockToTTIR.cpp` (`-rock-to-ttir`) -- rewrite Rock blockwise/gemm ops to `tt.load`/`tt.store`/`tt.dot`/`tt.reduce`. Add a new `OpRewritePattern` here when you introduce a Rock op that needs to reach the GPU through Triton.
+- `mlir/lib/Dialect/Rock/Transforms/FuncToTritonFunc.cpp` (`-rock-func-to-triton-func`) -- module-level pass that turns `func.func` kernels into `tt.func`, lifts tensor args to `!tt.ptr`, and folds pointer arith into `tt.addptr`. Touch this when the kernel calling convention or pointer-attribute layout changes.
+
+Both are scheduled by `rock::buildKernelPipeline` in `Pipelines.cpp`. After they run, the kernel module body is `tt.func` only.
+
+## Touching the Triton-driven pipeline
+
+If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
+
+1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`.
+2. Mirror the change in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` (`makeTTIR`/`makeTTGIR`/`makeLLIR` -- TTIR/TTGIR/LLIR MLIR-side passes) or `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (LLVM IR finalization, AMDGCN, HSACO).
+3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes.
+4. If you need a hardware capability not yet exposed by `rock`, add it to `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` rather than reaching into `triton::AMD::TargetInfo`.
+5. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
 
 ## Adding a MIGraphX operation
 
@@ -630,8 +681,18 @@ rocmlir-driver --debug-only=serialize-to-blob -c input.mlir
 ## Debugging Triton-side failures
 
 ```bash
-# Re-run only the Triton lowering
-rocmlir-driver -kernel-pipeline=gpu,rocdl --arch=gfx942 input.mlir
+# Bridge only: Rock dialect -> tt.func (no TTGIR yet)
+rocmlir-driver -kernel-pipeline=gpu --arch=gfx942 input.mlir
+
+# Stop after TTIR/TTGIR/LLIR (no HSACO emission)
+rocmlir-driver -kernel-pipeline=gpu,triton --arch=gfx942 input.mlir
+
+# Inspect just the bridge passes individually
+rocmlir-opt --rock-to-ttir input.mlir
+rocmlir-opt --rock-func-to-triton-func input.mlir
+
+# Run only the Triton-driven pass pipeline on a tt.func module
+rocmlir-opt --rock-triton-pipeline='arch=gfx942 num-warps=4 ...' tt.mlir
 
 # Compare against upstream Triton's Python pipeline by running a reference
 # kernel through `python -m triton.runtime.compile` (only when Triton's

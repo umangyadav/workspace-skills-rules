@@ -22,14 +22,24 @@ Features: `-mfma`, `-wmma`, `-dot`, `-atomic_add` (each: `infer`/`on`/`off`)
 
 ## rocmlir-driver -- run lowering pipelines
 
-- `-kernel-pipeline`: `applicability`, `migraphx`, `highlevel`, `gpu`, `rocdl`, `binary`, `full` (`gpu,binary`)
-- `-host-pipeline`: `migraphx`, `highlevel`, `runner` (mhal is currently disabled)
-- `-c`: shorthand for `-kernel-pipeline=full -host-pipeline=runner`
-- `-targets`, `-verify-passes`, `-dump-pipelines`
+- `-kernel-pipeline`: comma list of `migraphx`, `highlevel`, `gpu`, `triton`, `binary`, or `full` (= `gpu,triton,binary`)
+  - `gpu` runs `rock::buildKernelPipeline` (Rock -> RockToTTIR -> tt.func)
+  - `triton` runs `rock::buildTritonPipeline` (TTIR -> TTGIR -> LLVM dialect, replicating Triton's `make_ttir`/`make_ttgir`/`make_llir`)
+  - `binary` runs `rock::buildBackendPipeline` (`TritonToHsacoPass` + host glue via `RockRestoreHostCode` + `buildHostLoweringPipeline`)
+- `-host-pipeline`: comma list of `migraphx`, `highlevel`, `backend`
+- `-c`: hidden legacy shorthand for `-kernel-pipeline=full` (does **not** set the host pipeline; pair with `-host-pipeline=...` if you also need host lowering)
+- `-arch`, `-dump-pipelines`, `-disable-verify-passes`, `-dump-cpu-schedules=<dir>`
 
 ## rocmlir-opt -- MLIR optimizer
 
-Standard `mlir-opt` interface with all Rock + MIGraphX + Triton-related passes registered via `InitRocMLIRPasses.h`.
+Standard `mlir-opt` interface with all Rock + MIGraphX + Triton-related passes registered via `InitRocMLIRPasses.h`. Useful pipeline names registered through `rock::registerPipelines()`:
+
+- `--rock-highlevel-pipeline`
+- `--rock-kernel-pipeline` (ends in `tt.func`)
+- `--rock-triton-pipeline` (TTIR -> TTGIR -> LLIR)
+- `--rock-backend-pipeline` (LLVM IR -> HSACO + host lowering)
+
+Useful individual passes for the Rock<->Triton bridge: `--rock-to-ttir`, `--rock-func-to-triton-func`, `--rock-serialize-host-funcs`, `--rock-restore-host-code`, `--triton-to-hsaco`.
 
 ## rocmlir-translate -- translation entry points
 

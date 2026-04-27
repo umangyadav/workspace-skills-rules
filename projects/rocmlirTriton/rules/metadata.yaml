@@ -4,8 +4,8 @@ rules:
     alwaysApply: true
 
   - name: triton-integration
-    description: "Triton submodule integration, LLVM build flow via Triton, local patches, and Python-to-C++ replication points."
-    globs: "mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp,mlir/lib/Translation/**/*.cpp,mlir/lib/Dialect/Rock/utility/tritonUtils.*,mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp,triton-patches/**/*,scripts/build-llvm.sh,cmake/triton.cmake,.gitmodules"
+    description: "Triton submodule integration, the Rock<->Triton bridge passes (RockToTTIR, RockFuncToTritonFunc), LLVM build flow via Triton, local patches, and Python-to-C++ replication points."
+    globs: "mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp,mlir/lib/Dialect/Rock/Transforms/RockToTTIR.cpp,mlir/lib/Dialect/Rock/Transforms/FuncToTritonFunc.cpp,mlir/lib/Dialect/Rock/Transforms/SerializeHostFuncs.cpp,mlir/lib/Dialect/Rock/Transforms/RestoreHostCode.cpp,mlir/lib/Translation/**/*.cpp,mlir/lib/Dialect/Rock/utility/tritonUtils.*,mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp,triton-patches/**/*,scripts/build-llvm.sh,cmake/triton.cmake,.gitmodules"
 
   - name: llvm-cpp-standards
     description: "LLVM/MLIR C++ coding standards: casting, ADT types, error handling, naming, includes, namespaces."

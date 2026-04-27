@@ -7,6 +7,22 @@ alwaysApply: true
 
 rocmlirTriton is a fork/derivative of [rocMLIR](https://github.com/ROCm/rocMLIR) that lowers Rock dialect kernels (convolution, GEMM, attention, fused ops) through [OpenAI Triton](https://github.com/triton-lang/triton)'s TTIR/TTGIR/LLIR pipeline to AMD GPU code. It targets AMD hardware (ROCm).
 
+## Compilation arc
+
+```
+TOSA / MIGraphX
+    -> highlevel  (Linalg + Rock view-to-transform, fold-broadcast, ...)
+    -> Rock dialect (rock.gemm/conv/attention -> rock.gridwise -> rock.blockwise -> ptr arith)
+    -> RockToTTIRPass + RockFuncToTritonFuncPass   <-- bridge into the Triton (`tt`) dialect
+    -> Triton IR (TTIR)         via makeTTIR
+    -> TritonGPU IR (TTGIR)     via makeTTGIR
+    -> LLVM IR                  via makeLLIR
+    -> AMDGCN -> HSACO          via TritonToHsacoPass
+    -> Host glue (gpu.launch_func + LLVM lowering) via RestoreHostCode + buildHostLoweringPipeline
+```
+
+The four rocmlir-driver pipelines that drive this are `rock-highlevel-pipeline`, `rock-kernel-pipeline`, `rock-triton-pipeline`, `rock-backend-pipeline` (see `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`). Most of the Triton-side stages (`makeTTIR`/`makeTTGIR`/`makeLLIR`, `TritonToHsacoPass`) are C++ replicas of upstream Triton's Python `compiler.py`.
+
 ## Key facts
 
 - Public repository on [ROCm/rocmlirTriton](https://github.com/ROCm/rocmlirTriton)

@@ -17,15 +17,24 @@
 3. Add `add_rocmlir_conversion_library(...)` in CMakeLists
 4. Add Lit tests in `mlir/test/Conversion/FooToBar/`
 
-## Touching the Triton-side pipeline
+## Touching the Rock <-> Triton bridge
 
-If your change crosses into the Triton-driven part of the pipeline:
+The two passes that translate Rock dialect IR into Triton's `tt` dialect:
 
-1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`
-2. Mirror the change in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` (TTIR/TTGIR/LLIR-part-1) or `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (LLIR-part-2 + amdgcn + hsaco)
-3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes
-4. If you need a hardware capability not yet exposed by `rock`, add it to `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` rather than reaching into `triton::AMD::TargetInfo`
-5. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable
+- `mlir/lib/Dialect/Rock/Transforms/RockToTTIR.cpp` (`-rock-to-ttir`) -- rewrite Rock blockwise/gemm ops to `tt.load`/`tt.store`/`tt.dot`/`tt.reduce`. Add a new `OpRewritePattern` here when you introduce a Rock op that needs to reach the GPU through Triton.
+- `mlir/lib/Dialect/Rock/Transforms/FuncToTritonFunc.cpp` (`-rock-func-to-triton-func`) -- module-level pass that turns `func.func` kernels into `tt.func`, lifts tensor args to `!tt.ptr`, and folds pointer arith into `tt.addptr`. Touch this when the kernel calling convention or pointer-attribute layout changes.
+
+Both are scheduled by `rock::buildKernelPipeline` in `Pipelines.cpp`. After they run, the kernel module body is `tt.func` only.
+
+## Touching the Triton-driven pipeline
+
+If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
+
+1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`.
+2. Mirror the change in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp` (`makeTTIR`/`makeTTGIR`/`makeLLIR` -- TTIR/TTGIR/LLIR MLIR-side passes) or `mlir/lib/Translation/TritonToHsaco/TritonToHsaco.cpp` (LLVM IR finalization, AMDGCN, HSACO).
+3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes.
+4. If you need a hardware capability not yet exposed by `rock`, add it to `mlir/lib/Dialect/Rock/IR/AmdArchDb.cpp` rather than reaching into `triton::AMD::TargetInfo`.
+5. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
 
 ## Adding a MIGraphX operation
 
@@ -75,8 +84,18 @@ rocmlir-driver --debug-only=serialize-to-blob -c input.mlir
 ## Debugging Triton-side failures
 
 ```bash
-# Re-run only the Triton lowering
-rocmlir-driver -kernel-pipeline=gpu,rocdl --arch=gfx942 input.mlir
+# Bridge only: Rock dialect -> tt.func (no TTGIR yet)
+rocmlir-driver -kernel-pipeline=gpu --arch=gfx942 input.mlir
+
+# Stop after TTIR/TTGIR/LLIR (no HSACO emission)
+rocmlir-driver -kernel-pipeline=gpu,triton --arch=gfx942 input.mlir
+
+# Inspect just the bridge passes individually
+rocmlir-opt --rock-to-ttir input.mlir
+rocmlir-opt --rock-func-to-triton-func input.mlir
+
+# Run only the Triton-driven pass pipeline on a tt.func module
+rocmlir-opt --rock-triton-pipeline='arch=gfx942 num-warps=4 ...' tt.mlir
 
 # Compare against upstream Triton's Python pipeline by running a reference
 # kernel through `python -m triton.runtime.compile` (only when Triton's
