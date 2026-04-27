@@ -12,11 +12,11 @@ rocmlirTriton currently runs three CI systems. The configuration is largely inhe
 
 Files in `mlir/utils/jenkins/`:
 
-| File | Purpose | Header note |
-|------|---------|-------------|
-| `Jenkinsfile` | **Private CI**, runs on every PR | "Currently only PR CI is enabled. Nightly/weekly is commented out." + "ON CHANGING THESE, ALSO CHANGE Jenkinsfile.downstream" |
-| `Jenkinsfile.downstream` | **Public CI** mirror | "used for public CI" |
-| `Jenkinsfile.release` | Release-build storage only (`Set System Property` + `Store a Release Build`) | small, ~50 lines |
+| File | Purpose |
+|------|---------|
+| `Jenkinsfile` | **Private CI**, runs on every PR. The only active Jenkins pipeline today. |
+| `Jenkinsfile.downstream` | **Deprecated.** Used to drive a public-CI mirror. Public CI is no longer used; the file is kept in-tree for history but is not run. The "ALSO CHANGE Jenkinsfile.downstream" comment at the top of `Jenkinsfile` is stale -- ignore it. |
+| `Jenkinsfile.release` | Release-build storage only (`Set System Property` + `Store a Release Build`); ~50 lines. |
 
 PR pipeline (`Jenkinsfile`) is a **matrix** with axis `CODEPATH` over `vanilla, mfma, navi21, navi3x, navi4x, gfx950`. Per matrix row (each in a Docker container, ROCm clang from `/opt/rocm/llvm/bin`):
 
@@ -26,7 +26,7 @@ PR pipeline (`Jenkinsfile`) is a **matrix** with axis `CODEPATH` over `vanilla, 
 4. **Static checks** -- `python3 mlir/utils/jenkins/static-checks/premerge-checks.py --base-commit=origin/${TARGET}`. **Only runs on the `mfma` codepath** (`if (params.nightly == false) && (codepath == "mfma")`). Honors `params.ignoreExternalLinting` to skip the `external/` tree.
 5. **Run tests** -- `bash tests.sh` (the in-tree smoke suite)
 
-Nightly / weekly stages exist in the file but are commented out: shared-library random E2E, MIGraphX integration, `tuna-script.sh` tuning of selected GEMM/conv configs, static-lib package build, weekly parameter sweeps, weekly fusion tuning, perfDB archival, plot generation. **Whenever you re-enable any of those, mirror the change in `Jenkinsfile.downstream`** (the file headers explicitly call this out).
+Nightly / weekly stages exist in the file but are commented out: shared-library random E2E, MIGraphX integration, `tuna-script.sh` tuning of selected GEMM/conv configs, static-lib package build, weekly parameter sweeps, weekly fusion tuning, perfDB archival, plot generation. Re-enabling any of those is a private-CI-only change today -- do **not** propagate it to `Jenkinsfile.downstream`.
 
 ## Azure Pipelines (ROCm ecosystem)
 

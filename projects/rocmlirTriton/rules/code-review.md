@@ -10,7 +10,7 @@ Before every commit, run `git clang-format --diff origin/develop` (or the approp
 - **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`); same `mfma`-only gating
 - **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`); no pytest gate exists yet
 - **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline` (uses ROCm/ROCm's `rocMLIR.yml` template)
-- **Jenkins**: PR pipeline only today (`Jenkinsfile`); nightly/weekly stages exist in source but are commented out. Keep `Jenkinsfile.downstream` (public CI) in sync with any change to `Jenkinsfile`. `Jenkinsfile.release` only stores release builds.
+- **Jenkins**: PR pipeline only today (`Jenkinsfile`, private CI); nightly/weekly stages exist in source but are commented out. `Jenkinsfile.downstream` is deprecated (public CI is no longer used) and `Jenkinsfile.release` only stores release builds.
 
 ## Reference
 
