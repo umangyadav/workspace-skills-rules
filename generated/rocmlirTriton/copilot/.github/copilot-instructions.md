@@ -86,6 +86,8 @@ Breaking changes to Rock dialect IR or C API require coordination with MIGraphX.
 
 Before every commit, run `git clang-format --diff origin/develop` (or the appropriate base branch) and fix any issues. If the diff is non-empty, apply fixes and include them in the commit. This prevents CI failures from the premerge clang-format check.
 
+For changes that touch `external/triton/` or `triton-patches/`, additionally run `pre-commit run --from-ref origin/develop --to-ref HEAD` (or `--from-ref upstream/main` when validating against upstream Triton). This mirrors the upstream Triton hook stack -- ruff, yapf, clang-format (LLVM v19.1.6), mypy, plus the standard `pre-commit-hooks` set (trailing-whitespace, end-of-file-fixer, check-merge-conflict, debug-statements, detect-private-key, etc.).
+
 ## Premerge CI gates
 
 - **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed) -- on Jenkins this gate runs **only on the `mfma` matrix row** via `mlir/utils/jenkins/static-checks/premerge-checks.py`
@@ -129,6 +131,7 @@ Before every commit, run `git clang-format --diff origin/develop` (or the approp
 - New ops need `hasVerifier = 1` with `verify()` implementation
 - New passes and ops need positive E2E tests and both positive and negative Lit tests with FileCheck
 - New optimizations must verify presence of expected IR ops/instructions via FileCheck
+- Lit tests must follow [MLIR FileCheck best practices](https://mlir.llvm.org/getting_started/TestingGuide/#filecheck-best-practices) -- in particular "tests should be minimal". Don't dump a full Python-generated module; reduce to the smallest IR fragment that exercises the change. Bug fixes specifically should ship a minimized regression test.
 - Errors propagated via `LogicalResult`, never silently dropped
 - `librockcompiler_deps.cmake` updated when fat-library dependencies change
 - Hardware feature checks go through `rock::*` helpers (e.g. `rock::supportsTDM`), not `triton::AMD::TargetInfo` directly
@@ -177,6 +180,21 @@ All new `.cpp`, `.h`, and `.py` files must include a license header with the cor
 - Header present on all new source, header, and Python files
 - Copyright year matches the current year (not copied from older files)
 - SPDX identifier is exactly `Apache-2.0 WITH LLVM-exception`
+
+## PR description
+
+Write the description per the upstream Triton template style: explain **why, not how** ([reference](https://cbea.ms/git-commit/#why-not-how)). Reviewers use the diff to see *what* changed; the description should justify *why* the change is correct and worth landing. Either include a test (lit / unittest / E2E) or call out explicitly why one isn't needed.
+
+## Upstream Triton review conventions (for `external/triton/` and submodule bumps)
+
+When the change touches `external/triton/`, `triton-patches/`, or bumps the Triton SHA, apply these upstream conventions on top of the rocMLIR review checklist above:
+
+- **Code style**: Triton uses `BasedOnStyle: LLVM` clang-format -- identical to ours -- so the same `git clang-format` workflow works. Triton-side libraries also build with `-fno-exceptions -fno-rtti -Werror -Wno-covered-switch-default -fvisibility=hidden`; don't introduce code that violates these.
+- **Decision tier**: Triton's `CONTRIBUTING.md` distinguishes "uncontroversial" changes (bug fixes, perf wins with reasonable trade-offs) from "controversial" ones (IR / API / pass infra changes). Patches in `triton-patches/` that change Triton IR or pass behaviour belong in the controversial tier and need an explicit upstream-direction note in the PR description -- either "this will be upstreamed as PR #N" or "this is a permanent fork because ...".
+- **Test placement** (if you add Triton-side tests): `external/triton/test/` for lit, `external/triton/unittest/` for C++ gtest, `external/triton/python/test/` for end-to-end Python tests. Avoid creating new test files unless necessary -- extend an existing one.
+- **MLIR reproducer**: when a Triton-stage crash happens during review, ask the author for the MLIR reproducer (Triton emits one with `external_resources / mlir_reproducer` metadata). Save it to `/tmp/repro.mlir` and reproduce locally with `triton-opt /tmp/repro.mlir --run-reproducer`. Don't accept "works on my machine" for compiler crashes.
+- **CODEOWNERS awareness**: `external/triton/.github/CODEOWNERS` is per-file at `.h` / `.cpp` granularity (e.g. `lib/Analysis/Alias.cpp @Jokeren`, `lib/Dialect/TritonGPU/Transforms/Pipeline.cpp @ptillet`). When patching one of those files locally, name the upstream owner in the PR description so the reviewer knows whose code we're diverging from -- this also makes upstreaming the patch later much easier.
+- **No new contributor checklist**: our Jenkins doesn't enforce upstream's PR template, but the spirit (run pre-commit, add tests, justify trivial-only changes) is the same.
 
 ## Branch naming
 
