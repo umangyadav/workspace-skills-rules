@@ -20,7 +20,7 @@ The four rocmlir-driver pipelines that drive this are `rock-highlevel-pipeline`,
 
 ## Key facts
 
-- Public repository on [ROCm/rocmlirTriton](https://github.com/ROCm/rocmlirTriton)
+- Repository: [ROCm/rocmlirTriton](https://github.com/ROCm/rocmlirTriton) -- **currently private** (incubating); may be opened up later
 - Primary consumer: [MIGraphX](https://github.com/ROCm/AMDMIGraphX) via the `librockCompiler` fat library
 - License: Apache 2.0 with LLVM Exceptions (`LICENSE.TXT`)
 - CMake project name is still `rocMLIR` (`project(rocMLIR VERSION 2.0.0 ...)`), so binaries and helper functions retain `rocmlir-*` / `add_rocmlir_*` names
@@ -65,7 +65,13 @@ bash tests.sh                # E2E smoke + targeted lit suites
 
 ## Confidentiality
 
-This is a public repo. Never reference unreleased AMD hardware codenames, unannounced chip IDs, NDA-protected features, or internal project names. Use only publicly released `gfx*` identifiers.
+This repo is **private** today, but treat it as if it could be open-sourced at any time:
+
+- Write code, comments, commit messages, and PR descriptions as if the world will read them tomorrow -- avoid information that would have to be redacted before going public.
+- Internal-only references (NDA hardware codenames, unannounced chip IDs, customer names, internal Jira/Confluence URLs, internal Slack/email content) belong in internal trackers, **not** in this repo.
+- It is fine to reference unreleased `gfx*` IDs only when they are already mentioned upstream (in the pinned Triton submodule, the LLVM AMDGPU backend, or upstream rocMLIR). Otherwise prefer publicly released `gfx*` identifiers.
+- Do not paste customer kernels, model weights, or proprietary IR dumps into the repo (tests, comments, or commit bodies).
+- License headers, third-party notices, and Apache 2.0 + LLVM Exceptions language must already be in place on every new file -- "we'll fix headers before going public" is not an acceptable plan.
 
 ## Downstream impact
 
