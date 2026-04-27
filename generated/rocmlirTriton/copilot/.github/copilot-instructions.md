@@ -1,0 +1,211 @@
+# rocmlirTriton Project Overview
+
+rocmlirTriton is a fork/derivative of [rocMLIR](https://github.com/ROCm/rocMLIR) that lowers Rock dialect kernels (convolution, GEMM, attention, fused ops) through [OpenAI Triton](https://github.com/triton-lang/triton)'s TTIR/TTGIR/LLIR pipeline to AMD GPU code. It targets AMD hardware (ROCm).
+
+## Key facts
+
+- Public repository on [ROCm/rocmlirTriton](https://github.com/ROCm/rocmlirTriton)
+- Primary consumer: [MIGraphX](https://github.com/ROCm/AMDMIGraphX) via the `librockCompiler` fat library
+- License: Apache 2.0 with LLVM Exceptions (`LICENSE.TXT`)
+- CMake project name is still `rocMLIR` (`project(rocMLIR VERSION 2.0.0 ...)`), so binaries and helper functions retain `rocmlir-*` / `add_rocmlir_*` names
+
+## Source layout
+
+- `mlir/` -- all rocmlirTriton sources (edit here)
+- `external/triton/` -- **git submodule** of upstream Triton; brings its own `external/triton/llvm-project/` LLVM/MLIR
+- `triton-patches/*.patch` -- local patches applied on top of the Triton submodule by `scripts/build-llvm.sh`
+- `cmake/triton.cmake` -- wires `find_package(MLIR)` and `add_subdirectory(external/triton)` and defines `add_rocmlir_*` helpers
+- `scripts/build-llvm.sh` -- wrapper that initializes submodules, applies `triton-patches/`, forces `MLIR_ENABLE_ROCM_RUNNER=ON`, and runs Triton's `build-llvm-project.sh`
+- `cmake.sh` -- build helper that calls `scripts/build-llvm.sh`, configures CMake with `BUILD_FAT_LIBROCKCOMPILER=ON`, and runs Ninja
+- `tests.sh` -- E2E smoke tests run end-to-end via `mlir-runner` from `external/triton/llvm-project/build/`
+- `docs/` -- in-tree design docs (`bump_triton_version.md`, `scaled_gemm.md`, `cpu_validation_optimization.md`)
+
+## Tools
+
+- `rocmlir-gen` -- generate Rock dialect kernels and host harness
+- `rocmlir-driver` -- run kernel/host pipelines (`-c` is the default full pipeline)
+- `rocmlir-opt` -- MLIR optimizer with Rock + Triton passes registered
+- `rocmlir-tuning-driver` -- JIT tuning harness over perf configs
+- `rocmlir-translate` -- translate IR (e.g. `--gpu-module-to-rocdir`, `--triton-to-hsaco`)
+- `rocmlir-lsp-server` -- LSP server for editor integration
+
+## Build
+
+```sh
+bash cmake.sh                # default: BUILD_FAT_LIBROCKCOMPILER=ON, RelWithDebInfo, lld
+bash tests.sh                # E2E smoke + targeted lit suites
+```
+
+`mlir-runner` and the `libmlir_*_runtime.so` shared libraries come from `external/triton/llvm-project/build/`, **not** from a sibling `external/llvm-project/`.
+
+## Commit messages
+
+- Jira: `[AIROCMLIR-NNN] Description (#PR)`
+- Plain: `Fix/Add/Update description (#PR)`
+- Non-functional: `[NFC] Description`
+- Triton bump: `[TRITON-BUMP] Description`
+- Local Triton patch update: `[TRITON-PATCH] Description`
+- Release backport: `[BACKPORT] Description (#PR)`
+
+## Confidentiality
+
+This is a public repo. Never reference unreleased AMD hardware codenames, unannounced chip IDs, NDA-protected features, or internal project names. Use only publicly released `gfx*` identifiers.
+
+## Downstream impact
+
+Breaking changes to Rock dialect IR or C API require coordination with MIGraphX. Always keep `mlir/tools/rocmlir-lib/librockcompiler_deps.cmake` in sync after any dependency change (especially Triton bumps).
+
+
+---
+
+# Code Review Checklist
+
+## Pre-commit formatting
+
+Before every commit, run `git clang-format --diff origin/develop` (or the appropriate base branch) and fix any issues. If the diff is non-empty, apply fixes and include them in the commit. This prevents CI failures from the premerge clang-format check.
+
+## Premerge CI gates
+
+- **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed)
+- **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`)
+- **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`)
+- **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline`
+- **Jenkins**: PR / Nightly / Release pipelines (see `mlir/utils/jenkins/Jenkinsfile*`)
+
+## Reference
+
+- [LLVM Coding Standards](https://llvm.org/docs/CodingStandards.html) -- the authoritative style guide
+
+## Critical (blocks merge)
+
+- No unreleased hardware codenames, unannounced chip IDs, or NDA features in code/comments/commits/docs
+- No C++ exceptions; use `LogicalResult` / `emitOpError` / `signalPassFailure`
+- No RTTI (`dynamic_cast`, `typeid`); use LLVM's `isa`/`cast`/`dyn_cast`
+- No special values (e.g. `-1`, `nullptr`) to signal failure; use `FailureOr<>` instead
+- No `#include <iostream>`; use LLVM's `raw_ostream` for all output
+- No `using namespace std`; always use explicit `std::` prefix
+- No static constructors/destructors (global objects with ctors/dtors)
+- No committed temp/generated files (build artifacts, `*.pyc`, editor files, secrets, profiler output) -- see shared rule `workspace-hygiene`
+- No direct edits to `external/triton/`; capture local changes as `triton-patches/*.patch` instead
+- Breaking IR or C API changes must be documented and coordinated with MIGraphX
+- Triton submodule bumps in `external/triton` must come with the C++ replication audit (see `triton-integration.md` and the `triton-bump` skill)
+
+## Major
+
+- Follow DRY (don't repeat yourself), YAGNI (you aren't gonna need it), KISS (keep it simple)
+- No raw `new`/`delete`; use MLIR's allocation utilities, `std::unique_ptr`, or arena-based ownership
+- Prefer composition over inheritance; CRTP only where MLIR/LLVM requires it
+- Prefer `StringRef`, `ArrayRef`, `MutableArrayRef` over `std::string`, `std::vector` for non-owning parameters
+- Prefer `SmallVector` over `std::vector` for small/local collections
+- Prefer `llvm::DenseMap` over `std::map`/`std::unordered_map`
+- Use `assert` liberally with descriptive messages; use `llvm_unreachable` for impossible paths (not `assert(false)`)
+- Prefer C++-style casts (`static_cast`, `const_cast`) over C-style casts
+- Restrict visibility: `static` for file-local functions, anonymous namespaces only for class declarations
+- No default labels in fully covered switches over enumerations (preserves `-Wswitch`); important when consuming Triton's `ISAFamily` enum
+- Use `llvm::sort` instead of `std::sort` to avoid non-determinism with equal elements
+- Naming: classes `CamelCase`, functions/vars `camelBack` (per LLVM style and `.clang-tidy`)
+- New ops need `hasVerifier = 1` with `verify()` implementation
+- New passes and ops need positive E2E tests and both positive and negative Lit tests with FileCheck
+- New optimizations must verify presence of expected IR ops/instructions via FileCheck
+- Errors propagated via `LogicalResult`, never silently dropped
+- `librockcompiler_deps.cmake` updated when fat-library dependencies change
+- Hardware feature checks go through `rock::*` helpers (e.g. `rock::supportsTDM`), not `triton::AMD::TargetInfo` directly
+- License header on new files (SPDX `Apache-2.0 WITH LLVM-exception`)
+- TODOs must reference a tracking issue: `TODO(#issue-number)`
+
+## Minor
+
+- Include order: main module header, local/private, MLIR/LLVM, stdlib (each sorted lexicographically)
+- Headers must be self-contained with proper include guards
+- Comments as English prose with proper capitalization; use `///` for Doxygen on public APIs
+- Prefer early returns; no `else` after `return`
+- Prefer preincrement (`++i`) over postincrement (`i++`)
+- Prefer range-based for loops; don't re-evaluate `end()` in explicit iterator loops
+- Omit braces for single simple statements; use braces for multi-statement or nested blocks
+- `auto` only when type is obvious; `auto &` for values, `auto *` for pointers to avoid copies
+- Don't use `inline` for functions defined in class bodies (already implicitly inline)
+- Spaces before parentheses only in control flow (`if (x)`), not function calls (`foo(x)`)
+- Files end with newline; no trailing whitespace
+
+## License headers
+
+All new `.cpp`, `.h`, and `.py` files must include a license header with the correct current year. Verify on every review.
+
+**C++/Header files (`.cpp`, `.h`):**
+
+```
+//===- FileName.cpp - Brief description ----------------------------------===//
+//
+// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+```
+
+**Python files (`.py`):**
+
+```
+# Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+```
+
+**Review checklist:**
+- Header present on all new source, header, and Python files
+- Copyright year matches the current year (not copied from older files)
+- SPDX identifier is exactly `Apache-2.0 WITH LLVM-exception`
+
+## Branch naming
+
+- Feature: `users/<username>/<description>` or `<jira-id>-<description>`
+- Triton bump: `triton-bump-<month>-<year>` or `triton-bump-<commit-prefix>`
+- Prefer rebase over merge for clean history
+
+
+---
+
+# Skill Dispatch
+
+Before starting any task, check whether an available skill matches the user's request. Skills are located in `.cursor/skills/*/SKILL.md`. Read the matching skill file and follow its process before doing anything else.
+
+## Trigger keywords -> skill mapping
+
+| If the request mentions...                               | Use skill            |
+|----------------------------------------------------------|----------------------|
+| review PR, PR feedback, analyze PR                       | `pr-review`          |
+| build, compile, test, lint, check build, run tests.sh    | `build-test-workflow`|
+| profile, benchmark perf, kernel bottleneck               | `kernel-profiling`   |
+| run benchmarks, perfRunner, performance comparison       | `perfrunner-usage`   |
+| tune, tuning, perfConfig, tuningRunner                   | `tuningrunner-usage` |
+| release branch, cherry-pick, release patch               | `release-management` |
+| bump Triton, update Triton submodule, sync with Triton   | `triton-bump`        |
+| add Triton patch, refresh triton-patches                 | `triton-bump`        |
+
+If a skill matches, read its `SKILL.md` and follow the documented process step by step. Do not improvise a workflow when a skill already defines one.
+
+
+---
+
+# Workspace Hygiene
+
+## Never commit temp or generated files
+
+Build artifacts, `*.pyc`, editor configs, secrets, and profiler output must not be committed. Ensure `.gitignore` covers these.
+
+## Plan files and scratch notes
+
+Keep plan files, scratch notes, and working documents in a git-excluded directory (e.g., `plans/` added to `.gitignore`). Do not commit them.
+
+## Profiling and log output
+
+Profiling output (`.rocprofv3/`, `att_dump/`, `*.csv`, `*.pftrace`, `*.json` traces), logs, and other temp files should go in a dedicated directory outside the source tree (e.g., `/tmp/<project>-profiling/`). Never commit profiling results to the repo.
+
+## .gitignore checklist
+
+Verify these are excluded:
+- `build*/`, `*.pyc`, `*.orig`, `.cache/`, `.clangd/`
+- `plans/`, `scratch/`, `notes/`
+- `*.profraw`, `*.profdata`, `att_dump/`, `*.pftrace`
+- Editor files: `.vscode/`, `.idea/`, `*.sw?`, `*~`
+

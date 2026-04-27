@@ -1,0 +1,58 @@
+<!-- applyTo: **/CMakeLists.txt,**/*.cmake -->
+
+# CMake Conventions
+
+## Project structure
+
+- Root: `project(rocMLIR VERSION 2.0.0 LANGUAGES CXX C)` (name retained from the rocMLIR fork)
+- Triton + MLIR: pulled in via `cmake/triton.cmake` (`find_package(MLIR)` + `add_subdirectory(external/triton)`)
+- MLIR-HAL: currently disabled (`include(cmake/mlir-hal.cmake)` is commented out, see top-level `CMakeLists.txt`)
+- Generator: always Ninja (`-G Ninja`)
+- C++ standard: 17
+
+## MLIR_DIR resolution (in `cmake/triton.cmake`)
+
+`MLIR_DIR` is resolved in this order:
+
+1. Already set on the CMake command line (`-DMLIR_DIR=...`)
+2. `$ENV{MLIR_DIR}` if exported in the environment
+3. `external/triton/llvm-project/build/lib/cmake/mlir/` if Triton's LLVM has been built
+4. `${LLVM_LIBRARY_DIR}/cmake/mlir` if Triton already provided `LLVM_LIBRARY_DIR`
+5. Fallback: invoke `scripts/build-llvm.sh` automatically and retry
+
+Set `MLIR_DIR` explicitly when integrating against an external LLVM install.
+
+## Custom CMake functions (defined in `cmake/triton.cmake`)
+
+| Function | Use for |
+|----------|---------|
+| `add_rocmlir_dialect_library` | Dialect IR libraries |
+| `add_rocmlir_conversion_library` | Conversion pass libraries |
+| `add_rocmlir_test_library` | Test helper libraries |
+| `add_rocmlir_public_c_api_library` | C API libraries |
+| `add_rocmlir_tool` | CLI tools (auto-handles `BUILD_FAT_LIBROCKCOMPILER` exclude logic) |
+| `add_rocmlir_triton_library` | Rock-to-Triton glue libraries |
+
+## Notable CMake options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `BUILD_FAT_LIBROCKCOMPILER` | OFF (ON via `cmake.sh`) | Static `librockCompiler.a` for MIGraphX |
+| `MLIR_INCLUDE_TESTS` | ON | Enables `check-rocmlir-build-only` |
+| `ROCK_E2E_TEST_ENABLED` | OFF | Full E2E test suite |
+| `ROCMLIR_DRIVER_E2E_TEST_ENABLED` | OFF | Build E2E driver tests |
+| `ROCMLIR_DRIVER_PR_E2E_TEST_ENABLED` | OFF | PR-scoped E2E tests |
+| `ROCMLIR_DRIVER_RANDOM_DATA_SEED` | `none` | Random-data E2E mode |
+| `ROCMLIR_GEN_FLAGS` | "" | Extra flags forwarded to `rocmlir-gen` (e.g. `-mfma=off -wmma=off`) |
+| `ROCMLIR_ENABLE_BENCHMARKS` | "" | `hipblaslt`, `ck`, or `all` |
+| `MLIR_ENABLE_ROCM_RUNNER` | ON | Required for `mlir-runner` GPU execution |
+| `ROCMLIR_PARALLEL_LINK_JOBS` / `_COMPILE_JOBS` | "" | Limit Ninja link/compile concurrency |
+
+## Triton-specific CMake settings (set in `cmake/triton.cmake`)
+
+- `TRITON_BUILD_PYTHON_MODULE OFF` (we use the C++ API)
+- `TRITON_BUILD_PROTON OFF`
+- `TRITON_BUILD_UT OFF`
+- `TRITON_CODEGEN_BACKENDS "amd" "nvidia"`
+
+Do not change these defaults without coordinating with the Triton bump owner.

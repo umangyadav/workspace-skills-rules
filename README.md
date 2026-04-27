@@ -89,6 +89,13 @@ In Cursor Settings > Rules, add the GitHub repo URL under "Remote Rules". Cursor
 - 9 rules, 7 skills
 - See `projects/rocmlir/` for details
 
+### rocmlirTriton
+
+[rocmlirTriton](https://github.com/ROCm/rocmlirTriton) -- rocMLIR variant that lowers Rock dialect kernels through Triton's TTIR/TTGIR/LLIR pipeline to AMD GPUs.
+
+- 11 rules, 7 skills
+- See `projects/rocmlirTriton/` for details
+
 ## License
 
 MIT
