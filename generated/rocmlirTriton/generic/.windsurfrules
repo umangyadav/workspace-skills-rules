@@ -1210,6 +1210,8 @@ Use `git show pr-<number>:<filepath>` to read files at their PR-branch state wit
 
 Flag any failing checks. Per-check details, file paths, and what each gate looks at live in `ci-pipelines.md`. Quick summary: GitHub Actions (Python lint only), Azure (`rocMLIR.yml`), Jenkins PR matrix (clang-format/tidy on `mfma` row only).
 
+GitHub Copilot also posts automated review comments on PRs in this repo. Treat them as **advisory** -- skim them for low-effort wins, but don't rubber-stamp their suggested fixes; re-validate any Copilot-proposed change against the human checklists below before agreeing.
+
 ### 3. Review changed files
 
 Read all changed files. Apply the existing checklists -- don't re-derive them:
