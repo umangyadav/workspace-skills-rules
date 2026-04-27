@@ -42,10 +42,11 @@ Use `git show pr-<number>:<filepath>` to read files at their PR-branch state wit
 
 ### 2. Check CI status
 
-Flag any failing checks:
-- GitHub Actions (Python flake8 + yapf on changed `mlir/**/*.py`)
-- Azure Pipelines (ROCm build/test)
-- Jenkins (premerge clang-format/tidy, build, tests)
+Flag any failing checks (see the `ci-pipelines` rule for the full picture):
+
+- GitHub Actions: `Python Lint and Format Check` (flake8 + yapf on changed `mlir/**/*.py` only; nothing else runs in GHA)
+- Azure Pipelines: ROCm CI via `rocMLIR.yml@pipelines_repo`
+- Jenkins: PR pipeline only (matrix over `vanilla, mfma, navi21, navi3x, navi4x, gfx950`); per row runs `bash cmake.sh` -> `premerge-checks.py` (clang-format/tidy, **only on `mfma` codepath**) -> `bash tests.sh`. Nightly/weekly are currently commented out.
 
 ### 3. Review changed files
 

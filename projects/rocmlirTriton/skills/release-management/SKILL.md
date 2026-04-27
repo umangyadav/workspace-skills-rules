@@ -39,6 +39,6 @@ Release patches must pass Jenkins PR CI and (when re-enabled) nightly CI, and re
 
 ## CI triggers on release branches
 
-- GitHub Actions: `release/**` (Python lint on changed `mlir/**/*.py`)
-- Azure Pipelines: `mainline` (release integration), `develop` (PRs)
-- Jenkins: `Jenkinsfile.release` for release builds
+- GitHub Actions: `Python Lint and Format Check` runs on push/PR to `release/**` (flake8 + yapf on changed `mlir/**/*.py`); no other GHA gates today
+- Azure Pipelines: triggers on push to `mainline` (release integration) and PRs to `develop`
+- Jenkins: `Jenkinsfile.release` only "Stores a Release Build" -- it does **not** run the full PR build/test matrix, so make sure your changes have already been validated by the regular `Jenkinsfile` PR pipeline

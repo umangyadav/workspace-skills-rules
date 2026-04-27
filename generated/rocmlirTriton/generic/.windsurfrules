@@ -311,11 +311,11 @@ Before every commit, run `git clang-format --diff origin/develop` (or the approp
 
 ## Premerge CI gates
 
-- **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed)
-- **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`)
-- **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`)
-- **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline`
-- **Jenkins**: PR / Nightly / Release pipelines (see `mlir/utils/jenkins/Jenkinsfile*`)
+- **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed) -- on Jenkins this gate runs **only on the `mfma` matrix row** via `mlir/utils/jenkins/static-checks/premerge-checks.py`
+- **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`); same `mfma`-only gating
+- **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`); no pytest gate exists yet
+- **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline` (uses ROCm/ROCm's `rocMLIR.yml` template)
+- **Jenkins**: PR pipeline only today (`Jenkinsfile`); nightly/weekly stages exist in source but are commented out. Keep `Jenkinsfile.downstream` (public CI) in sync with any change to `Jenkinsfile`. `Jenkinsfile.release` only stores release builds.
 
 ## Reference
 
@@ -710,36 +710,63 @@ rocmlir-opt --rock-triton-pipeline='arch=gfx942 num-warps=4 ...' tt.mlir
 
 # CI Pipelines
 
-rocmlirTriton uses three CI systems.
+rocmlirTriton currently runs three CI systems. The configuration is largely inherited from rocMLIR; some pieces are intentionally pared down for the early-stage repo.
 
-## Jenkins (primary, GPU-heavy)
+## Jenkins (primary, GPU-heavy) -- PR only today
 
-- Configs: `mlir/utils/jenkins/Jenkinsfile`, `Jenkinsfile.downstream`, `Jenkinsfile.release` (Groovy)
-- Currently the PR pipeline is enabled; nightly/weekly stages exist but are commented out (see top-of-file comment)
-- Docker: `mlir/utils/jenkins/Dockerfile` and `Dockerfile.migraphx-ci`; uses `rocm/mlir:rocm<version>-latest`-style images, Ninja, ROCm clang, `RelWithDebInfo`
-- PR: premerge clang-format/tidy, build, targeted lit + E2E subset
-- Nightly (when re-enabled): all E2E with random data, perf comparison, MIGraphX integration
-- Weekly (when re-enabled): exhaustive tier1 tuning + parameter sweeps + perfDB archival
+Files in `mlir/utils/jenkins/`:
 
-Whenever you re-enable a Jenkins stage, mirror the change in `Jenkinsfile.downstream`.
+| File | Purpose | Header note |
+|------|---------|-------------|
+| `Jenkinsfile` | **Private CI**, runs on every PR | "Currently only PR CI is enabled. Nightly/weekly is commented out." + "ON CHANGING THESE, ALSO CHANGE Jenkinsfile.downstream" |
+| `Jenkinsfile.downstream` | **Public CI** mirror | "used for public CI" |
+| `Jenkinsfile.release` | Release-build storage only (`Set System Property` + `Store a Release Build`) | small, ~50 lines |
+
+PR pipeline (`Jenkinsfile`) is a **matrix** with axis `CODEPATH` over `vanilla, mfma, navi21, navi3x, navi4x, gfx950`. Per matrix row (each in a Docker container, ROCm clang from `/opt/rocm/llvm/bin`):
+
+1. SCM checkout (with `robustScmCheckout` deep-clone fallback for "reference is not a tree")
+2. Prepare Docker environment (image is ROCm-based; pulled via `dockerImage()`)
+3. **Configure and build rocmlirTriton** -- `bash cmake.sh` (`RelWithDebInfo`, `BUILD_FAT_LIBROCKCOMPILER=ON`)
+4. **Static checks** -- `python3 mlir/utils/jenkins/static-checks/premerge-checks.py --base-commit=origin/${TARGET}`. **Only runs on the `mfma` codepath** (`if (params.nightly == false) && (codepath == "mfma")`). Honors `params.ignoreExternalLinting` to skip the `external/` tree.
+5. **Run tests** -- `bash tests.sh` (the in-tree smoke suite)
+
+Nightly / weekly stages exist in the file but are commented out: shared-library random E2E, MIGraphX integration, `tuna-script.sh` tuning of selected GEMM/conv configs, static-lib package build, weekly parameter sweeps, weekly fusion tuning, perfDB archival, plot generation. **Whenever you re-enable any of those, mirror the change in `Jenkinsfile.downstream`** (the file headers explicitly call this out).
 
 ## Azure Pipelines (ROCm ecosystem)
 
 - Config: `.azuredevops/rocm-ci.yml`
 - Triggers: push to `develop`/`mainline`, PRs to `develop`
 - Excludes: `.github/`, `*.md`
-- Uses shared templates from the `ROCm/ROCm` repo (`/.azuredevops/variables-global.yml@pipelines_repo` and `${{ variables.CI_COMPONENT_PATH }}/rocMLIR.yml@pipelines_repo`)
+- Loads shared templates from the `ROCm/ROCm` repo: `/.azuredevops/variables-global.yml@pipelines_repo` and `${{ variables.CI_COMPONENT_PATH }}/rocMLIR.yml@pipelines_repo`
+- Note: the template name is still `rocMLIR.yml` (carryover from the fork). Keep it that way until ROCm/ROCm publishes a `rocmlirTriton.yml` template; do not switch unilaterally.
 
-## GitHub Actions (lightweight Python lint)
+## GitHub Actions (lightweight Python lint, only)
 
-- Config: `.github/workflows/ci.yml`
-- Container: `python:3.8`
-- Triggers: PRs and pushes touching `mlir/**` on `develop` and `release/**`; `external/**` is excluded
-- Steps: install `pip_requirements.txt`, compute changed `mlir/**/*.py` against the merge base, run `flake8` (with the project's ignore list) and `yapf --diff`
+- Workflow: `.github/workflows/ci.yml` -- name `"Python Lint and Format Check"`
+- Triggers: `pull_request` and `push` to `develop` and `release/**`, paths `mlir/**`, excludes `external/**`
+- Container: `python:3.8`, runs as root via `--user root`, fixes git ownership before checkout
+- Steps:
+  1. Install `pip_requirements.txt`
+  2. Compute changed `mlir/**/*.py` against `git merge-base HEAD origin/<base>`
+  3. `flake8 --ignore=E501,E251,E124,W605,W504,E131,E126,W503,E123 <files>`
+  4. `yapf --diff <files>` (fails the job if any diff is produced)
+  5. If no `*.py` under `mlir/` changed, prints "skipping" and passes
+
+There is **no** pytest workflow, **no** codecov workflow, and no GPU/build job in GitHub Actions today (those live in Jenkins/Azure). The only file in `.github/workflows/` is `ci.yml` (plus the placeholder `README.md`).
 
 ## CODEOWNERS
 
 All paths: `@causten` (`.github/CODEOWNERS`).
+
+## Source of truth when CI fails
+
+| Failing check | Look in |
+|---------------|---------|
+| `Python Lint and Format Check` | `.github/workflows/ci.yml`, `.flake8`, `.style.yapf` |
+| Azure `rocMLIR` job | `.azuredevops/rocm-ci.yml` + ROCm/ROCm `rocMLIR.yml` template |
+| Jenkins `Configure and build rocmlirTriton` | `cmake.sh`, `scripts/build-llvm.sh`, `cmake/triton.cmake` |
+| Jenkins `Static checks (clang-format & clang-tidy)` | `mlir/utils/jenkins/static-checks/premerge-checks.py`, `clang-format.ignore`, `clang-tidy.ignore` |
+| Jenkins `Run tests` | `tests.sh` |
 
 
 ---
@@ -875,8 +902,8 @@ cd build && LIT_FILTER=rocmlir-tuning-driver ninja check-rocmlir
 ## Step 3: Lint
 
 - **C++ format**: `git clang-format --diff origin/develop`
-- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge runs static checks via `mlir/utils/jenkins/static-checks/`
-- **Python lint/format**: `flake8` + `yapf` on changed `mlir/**/*.py` (see `.github/workflows/ci.yml`)
+- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge invokes `mlir/utils/jenkins/static-checks/premerge-checks.py` (clang-format + clang-tidy, **only on the `mfma` matrix row**)
+- **Python lint/format**: `flake8 --ignore=E501,E251,E124,W605,W504,E131,E126,W503,E123` + `yapf --diff` on changed `mlir/**/*.py` (see `.github/workflows/ci.yml`); no pytest gate exists yet
 
 ## Step 4: Report
 
@@ -1184,10 +1211,11 @@ Use `git show pr-<number>:<filepath>` to read files at their PR-branch state wit
 
 ### 2. Check CI status
 
-Flag any failing checks:
-- GitHub Actions (Python flake8 + yapf on changed `mlir/**/*.py`)
-- Azure Pipelines (ROCm build/test)
-- Jenkins (premerge clang-format/tidy, build, tests)
+Flag any failing checks (see the `ci-pipelines` rule for the full picture):
+
+- GitHub Actions: `Python Lint and Format Check` (flake8 + yapf on changed `mlir/**/*.py` only; nothing else runs in GHA)
+- Azure Pipelines: ROCm CI via `rocMLIR.yml@pipelines_repo`
+- Jenkins: PR pipeline only (matrix over `vanilla, mfma, navi21, navi3x, navi4x, gfx950`); per row runs `bash cmake.sh` -> `premerge-checks.py` (clang-format/tidy, **only on `mfma` codepath**) -> `bash tests.sh`. Nightly/weekly are currently commented out.
 
 ### 3. Review changed files
 
@@ -1298,9 +1326,9 @@ Release patches must pass Jenkins PR CI and (when re-enabled) nightly CI, and re
 
 ## CI triggers on release branches
 
-- GitHub Actions: `release/**` (Python lint on changed `mlir/**/*.py`)
-- Azure Pipelines: `mainline` (release integration), `develop` (PRs)
-- Jenkins: `Jenkinsfile.release` for release builds
+- GitHub Actions: `Python Lint and Format Check` runs on push/PR to `release/**` (flake8 + yapf on changed `mlir/**/*.py`); no other GHA gates today
+- Azure Pipelines: triggers on push to `mainline` (release integration) and PRs to `develop`
+- Jenkins: `Jenkinsfile.release` only "Stores a Release Build" -- it does **not** run the full PR build/test matrix, so make sure your changes have already been validated by the regular `Jenkinsfile` PR pipeline
 
 ---
 

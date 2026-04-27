@@ -88,11 +88,11 @@ Before every commit, run `git clang-format --diff origin/develop` (or the approp
 
 ## Premerge CI gates
 
-- **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed)
-- **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`)
-- **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`)
-- **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline`
-- **Jenkins**: PR / Nightly / Release pipelines (see `mlir/utils/jenkins/Jenkinsfile*`)
+- **clang-format**: `git-clang-format` vs base (LLVM style, no diff allowed) -- on Jenkins this gate runs **only on the `mfma` matrix row** via `mlir/utils/jenkins/static-checks/premerge-checks.py`
+- **clang-tidy**: errors fail, warnings tolerated; rules in `.clang-tidy` (`llvm-*`, `misc-*`, `readability-identifier-naming`); same `mfma`-only gating
+- **Python lint/format**: flake8 + yapf on changed `mlir/**/*.py` (GitHub Actions, see `.github/workflows/ci.yml`); no pytest gate exists yet
+- **Azure Pipelines**: ROCm CI (`.azuredevops/rocm-ci.yml`) on push/PR to `develop`/`mainline` (uses ROCm/ROCm's `rocMLIR.yml` template)
+- **Jenkins**: PR pipeline only today (`Jenkinsfile`); nightly/weekly stages exist in source but are commented out. Keep `Jenkinsfile.downstream` (public CI) in sync with any change to `Jenkinsfile`. `Jenkinsfile.release` only stores release builds.
 
 ## Reference
 

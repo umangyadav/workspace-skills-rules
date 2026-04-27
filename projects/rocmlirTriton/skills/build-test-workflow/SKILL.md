@@ -85,8 +85,8 @@ cd build && LIT_FILTER=rocmlir-tuning-driver ninja check-rocmlir
 ## Step 3: Lint
 
 - **C++ format**: `git clang-format --diff origin/develop`
-- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge runs static checks via `mlir/utils/jenkins/static-checks/`
-- **Python lint/format**: `flake8` + `yapf` on changed `mlir/**/*.py` (see `.github/workflows/ci.yml`)
+- **C++ tidy**: rules in `.clang-tidy`; the Jenkins premerge invokes `mlir/utils/jenkins/static-checks/premerge-checks.py` (clang-format + clang-tidy, **only on the `mfma` matrix row**)
+- **Python lint/format**: `flake8 --ignore=E501,E251,E124,W605,W504,E131,E126,W503,E123` + `yapf --diff` on changed `mlir/**/*.py` (see `.github/workflows/ci.yml`); no pytest gate exists yet
 
 ## Step 4: Report
 
