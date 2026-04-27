@@ -1120,17 +1120,28 @@ python3 perfRunner.py --op gemm --batch_all -c <configs> -t mlir_tuning.tsv
 
 ## Examples
 
-Run from the `build/` directory so default paths (`--test_dir`, `find_mlir_build_dir()`) resolve:
+Run from the `build/` directory so default paths (`--test_dir`, `find_mlir_build_dir()`) resolve. Always pass `-c` explicitly because the script's default `-c` points at a stale `mlir/utils/jenkins/performance/configs/...` path and otherwise fails with `FileNotFoundError`:
 
 ```bash
-python3 ../mlir/utils/performance/perfRunner.py --batch_all -t mlir_tuning.tsv               # conv vs MIOpen
-python3 ../mlir/utils/performance/perfRunner.py --op gemm --batch_all -t mlir_tuning.tsv     # GEMM vs hipBLASLt
-python3 ../mlir/utils/performance/perfRunner.py --op gemm --external-gemm-library CK -t mlir_tuning.tsv
+# Conv vs MIOpen
+python3 ../mlir/utils/performance/perfRunner.py --batch_all \
+  -c ../mlir/utils/performance/configs/tier1-conv-configs -t mlir_tuning.tsv
+
+# GEMM vs hipBLASLt
+python3 ../mlir/utils/performance/perfRunner.py --op gemm --batch_all \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs -t mlir_tuning.tsv
+
+# GEMM vs CK (an explicit mode is required: --batch_all, --batch_external, ...)
+python3 ../mlir/utils/performance/perfRunner.py --op gemm --batch_all \
+  --external-gemm-library CK \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs -t mlir_tuning.tsv
+
+# Fusion (--test_dir replaces -c for fusion mode)
 python3 ../mlir/utils/performance/perfRunner.py --op fusion \
   --test_dir ../mlir/test/fusion/resnet50-e2e -t tuning_fusion.tsv
 
 # Single inline GEMM config: must include -t, -out_datatype, -transA, -transB, -g, -m, -k, -n
-# (otherwise GemmConfig.from_command_line() raises 'Incomplete GEMM configuration').
+# (otherwise GemmConfiguration.from_command_line() raises 'Incomplete GEMM configuration').
 python3 ../mlir/utils/performance/perfRunner.py --op gemm -- \
   -t f32 -out_datatype f32 -transA true -transB true -g 1 -m 1024 -k 769 -n 512
 ```
