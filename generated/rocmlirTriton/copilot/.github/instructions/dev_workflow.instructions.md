@@ -1,0 +1,84 @@
+<!-- applyTo: mlir/**/*.cpp,mlir/**/*.h,mlir/**/*.td -->
+
+# Development Workflow
+
+## Adding a new Rock dialect operation
+
+1. Define op in `mlir/include/mlir/Dialect/Rock/IR/RockOps.td` (inherit `Rock_Op`, add traits, `hasVerifier = 1`)
+2. Implement verifier: `LogicalResult NewOp::verify()` in `mlir/lib/Dialect/Rock/IR/RockDialect.cpp`
+3. Add lowering in `mlir/lib/Dialect/Rock/Transforms/` using `OpRewritePattern` or `OpConversionPattern`
+4. Register pass in `mlir/include/mlir/Dialect/Rock/Passes.td`
+5. Wire into pipeline in `mlir/lib/Dialect/Rock/Pipelines/Pipelines.cpp`
+6. Add Lit tests in `mlir/test/Dialect/Rock/` (round-trip + pass tests; patterns in `testing-conventions.md`)
+7. Update `CMakeLists.txt` if new files added (helpers in `cmake-conventions.md`)
+
+## Adding a conversion pass (e.g. FooToBar)
+
+1. Declare in `mlir/include/mlir/Conversion/RocMLIRPasses.td`
+2. Create `mlir/lib/Conversion/FooToBar/` with pattern + pass `.cpp` files
+3. Add `add_rocmlir_conversion_library(...)` in `CMakeLists.txt`
+4. Add Lit tests in `mlir/test/Conversion/FooToBar/`
+
+## Touching the Rock <-> Triton bridge
+
+The two bridge passes (`-rock-to-ttir`, `-rock-func-to-triton-func`) and their files are documented in `triton-integration.md`. When extending them:
+
+- Add a new `OpRewritePattern` in `RockToTTIR.cpp` when you introduce a Rock op that needs to reach the GPU through Triton.
+- Touch `FuncToTritonFunc.cpp` when the kernel calling convention or pointer-attribute layout changes.
+
+## Touching the Triton-driven pipeline
+
+If your change crosses into the part of the pipeline that runs on `tt`/`ttg` IR:
+
+1. Find the Python equivalent in `external/triton/third_party/amd/backend/compiler.py` and the binding in `external/triton/third_party/amd/python/triton_amd.cc`.
+2. Mirror the change in the corresponding C++ replication point (table in `triton-integration.md`).
+3. Use `rock::*` helpers (`rock::supportsTDM`, etc.) to gate hardware-conditional passes; add new helpers in `AmdArchDb.cpp` if needed.
+4. If a fix should also live in upstream Triton, prefer drafting an upstream PR; only add a `triton-patches/*.patch` when waiting for upstream is not viable.
+
+## Adding a MIGraphX operation
+
+1. Define op in `mlir/include/mlir/Dialect/MIGraphX/IR/MIGraphX.td`
+2. Add lowering in `mlir/lib/Conversion/MIGraphXToTosa/`
+3. Add tests in `mlir/test/Conversion/`
+
+## Testing a new operation or feature
+
+Architecture coverage, dtype coverage, edge cases, and fusion-test requirements are documented in `testing-conventions.md`. The two key rules:
+
+- New ops/passes must work on every supported GPU arch present in CI; arch-specific paths must be guarded in both code and tests.
+- Enumerate all supported dtypes (`f16`, `bf16`, `f32`, `f8E4M3FN`, `f8E5M2`, `f4E2M1FN`, `i8`, `i4`, ...); reject unsupported ones with `emitOpError`.
+
+## Debugging a pass failure
+
+```bash
+# Isolate
+rocmlir-opt --my-pass input.mlir
+
+# Enable debug output (requires -DLLVM_ENABLE_ASSERTIONS=ON)
+rocmlir-opt --my-pass input.mlir --debug-only=my-pass
+
+# Dump full pipeline (rocMLIR side); --arch is required even for a dump
+rocmlir-driver --arch=gfx942 -dump-pipelines -kernel-pipeline=full input.mlir 2>&1
+
+# Dump GCN assembly emitted via Triton
+rocmlir-driver --debug-only=serialize-to-blob -c input.mlir
+```
+
+## Debugging Triton-side failures
+
+```bash
+# Bridge only: Rock dialect -> tt.func (no TTGIR yet)
+rocmlir-driver -kernel-pipeline=gpu --arch=gfx942 input.mlir
+
+# Stop after TTIR/TTGIR/LLIR (no HSACO emission)
+rocmlir-driver -kernel-pipeline=gpu,triton --arch=gfx942 input.mlir
+
+# Inspect just the bridge passes individually
+rocmlir-opt --rock-to-ttir input.mlir
+rocmlir-opt --rock-func-to-triton-func input.mlir
+
+# Run only the Triton-driven pass pipeline on a tt.func module
+rocmlir-opt --rock-triton-pipeline='arch=gfx942 num-warps=4 ...' tt.mlir
+```
+
+For full lowering + GPU validation (incl. the canonical `mlir-runner --shared-libs=...` invocation), use the `mlir/utils/widgets/rocm-run` wrapper or copy the line out of `tests.sh` -- see `rocmlir-tools.md` for the explicit form.
