@@ -609,17 +609,18 @@ All under `mlir/utils/performance/`. The two main entry points (`tuningRunner.py
 ## Common pipelines
 
 ```bash
-# Smoke
-rocmlir-gen --arch gfx942 -p | rocmlir-opt
+# Smoke (default op is conv -- supply problem dims; here a small GEMM)
+rocmlir-gen --arch gfx942 --operation gemm -t f16 -g 1 -m 64 -k 64 -n 64 -p | rocmlir-opt
 
-# Full lowering + validate (single op), Triton mlir-runner
-rocmlir-gen --arch gfx942 -ph -pv | rocmlir-driver -c | \
+# Full lowering + validate (single op), Triton mlir-runner.
+# rocmlir-gen defaults to conv and needs explicit problem dims; substitute -operation conv -fil_layout/... for conv.
+rocmlir-gen --arch gfx942 --operation gemm -t f16 -g 1 -m 64 -k 64 -n 64 -ph -pv | rocmlir-driver -c | \
   external/triton/llvm-project/build/bin/mlir-runner \
     --shared-libs=external/triton/llvm-project/build/lib/libmlir_rocm_runtime.so,build/lib/libconv-validation-wrappers.so,external/triton/llvm-project/build/lib/libmlir_runner_utils.so,external/triton/llvm-project/build/lib/libmlir_c_runner_utils.so \
     --entry-point-result=void
 
 # Tuning a single config
-rocmlir-gen --arch gfx942 --perf_config= | rocmlir-tuning-driver --tuning-space=quick
+rocmlir-gen --arch gfx942 --operation gemm -t f16 -g 1 -m 64 -k 64 -n 64 --perf_config= | rocmlir-tuning-driver --tuning-space=quick
 
 # Fusion E2E from .mlir input
 sed -e "s/gfx1100/$ARCH/g" -e "s/rock.num_cu = 96/rock.num_cu = $NUM_CU/g" fusion_with_host.mlir | \
@@ -688,8 +689,8 @@ rocmlir-opt --my-pass input.mlir
 # Enable debug output (requires -DLLVM_ENABLE_ASSERTIONS=ON)
 rocmlir-opt --my-pass input.mlir --debug-only=my-pass
 
-# Dump full pipeline (rocMLIR side)
-rocmlir-driver -dump-pipelines -kernel-pipeline=full input.mlir 2>&1
+# Dump full pipeline (rocMLIR side); --arch is required even for a dump
+rocmlir-driver --arch=gfx942 -dump-pipelines -kernel-pipeline=full input.mlir 2>&1
 
 # Dump GCN assembly emitted via Triton
 rocmlir-driver --debug-only=serialize-to-blob -c input.mlir
@@ -1093,11 +1094,11 @@ ROCR_VISIBLE_DEVICES=0 python3 perfRunner.py --op gemm --batch_all -c <configs> 
 
 ## Key flags
 
-- `-c` / `--configs_file` -- config file (default: `tier1-conv-configs`)
+- `-c` / `--configs_file` -- config file. The script's hard-coded default for conv (`mlir/utils/jenkins/performance/configs/tier1-conv-configs`) is **stale**; the actual configs live under `mlir/utils/performance/configs/`. Pass `-c` explicitly.
 - `-o` -- output file name (default: `{chip}_perf.{date}`)
 - `-t` / `--tuning_db` -- tuning DB TSV for "tuned" column
 - `-qt` / `--quick_tuning_db` -- quick tuning DB
-- `--test_dir` -- test directory for fusion mode (default: `../mlir/test/fusion/resnet50-e2e`)
+- `--test_dir` -- fusion-mode test directory. Default `../mlir/test/fusion/resnet50-e2e` only resolves when run from `build/`; from any other CWD pass an absolute or repo-rooted path (`mlir/test/fusion/resnet50-e2e`).
 - `--mlir-build-dir` -- build dir (auto-detected)
 - `--external-gemm-library` -- `hipBLASLt` (default) or `CK`
 - `--data-type` -- force types: `f32`, `f16`, `i8`, `i8_i32`, `i8_i8`, `fp8`, `fp8_fp8`, `fp8_f32`
@@ -1119,14 +1120,19 @@ python3 perfRunner.py --op gemm --batch_all -c <configs> -t mlir_tuning.tsv
 
 ## Examples
 
-```bash
-python3 perfRunner.py --batch_all -t mlir_tuning.tsv                    # conv vs MIOpen
-python3 perfRunner.py --op gemm --batch_all -t mlir_tuning.tsv          # GEMM vs hipBLASLt
-python3 perfRunner.py --op gemm --external-gemm-library CK -t mlir_tuning.tsv
-python3 perfRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e -t tuning_fusion.tsv
+Run from the `build/` directory so default paths (`--test_dir`, `find_mlir_build_dir()`) resolve:
 
-# Single config (no tuning DB needed)
-python3 perfRunner.py --op gemm -- -t f32 -transA true -transB true -g 1 -m 1024 -k 769 -n 512
+```bash
+python3 ../mlir/utils/performance/perfRunner.py --batch_all -t mlir_tuning.tsv               # conv vs MIOpen
+python3 ../mlir/utils/performance/perfRunner.py --op gemm --batch_all -t mlir_tuning.tsv     # GEMM vs hipBLASLt
+python3 ../mlir/utils/performance/perfRunner.py --op gemm --external-gemm-library CK -t mlir_tuning.tsv
+python3 ../mlir/utils/performance/perfRunner.py --op fusion \
+  --test_dir ../mlir/test/fusion/resnet50-e2e -t tuning_fusion.tsv
+
+# Single inline GEMM config: must include -t, -out_datatype, -transA, -transB, -g, -m, -k, -n
+# (otherwise GemmConfig.from_command_line() raises 'Incomplete GEMM configuration').
+python3 ../mlir/utils/performance/perfRunner.py --op gemm -- \
+  -t f32 -out_datatype f32 -transA true -transB true -g 1 -m 1024 -k 769 -n 512
 ```
 
 ## External baselines
@@ -1415,9 +1421,9 @@ ROCR_VISIBLE_DEVICES=0 python3 tuningRunner.py --op gemm -c <configs>
 
 ## Config source
 
-- `-c` / `--configs_file` -- file of configurations (default: `mlir/utils/jenkins/performance/configs/tier1-conv-configs`)
-- `--config <STR ...>` -- one or more inline config strings to test instead of a file (`nargs='*'`)
-- `--test_dir` -- fusion E2E tests directory (default: `../mlir/test/fusion/resnet50-e2e`); used when `--op fusion`
+- `-c` / `--configs_file` -- file of configurations. The script's hard-coded default points at `mlir/utils/jenkins/performance/configs/tier1-conv-configs`, which **does not exist** -- the actual configs live under `mlir/utils/performance/configs/`. Always pass `-c` explicitly, e.g. `-c mlir/utils/performance/configs/tier1-gemm-configs`.
+- `--config <STR ...>` -- one or more inline config strings to test instead of a file (`nargs='*'`). For GEMM, the string **must** include all of `-t`, `-out_datatype`, `-transA`, `-transB`, `-g`, `-m`, `-k`, `-n` -- otherwise `perfRunner.GemmConfig.from_command_line()` raises `ValueError: Incomplete GEMM configuration`.
+- `--test_dir` -- fusion E2E tests directory. Default `../mlir/test/fusion/resnet50-e2e` only resolves when run from the `build/` directory. From any other CWD, pass an absolute or repo-rooted path (the actual source is `mlir/test/fusion/resnet50-e2e`). Used only when `--op fusion`.
 
 ## Operation
 
@@ -1455,11 +1461,18 @@ Header columns (printed once at the top of `--output`):
 
 ## Examples
 
+Run from the rocmlirTriton `build/` directory so the script's default `--test_dir`/`find_mlir_build_dir()` resolve correctly:
+
 ```bash
-python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs -o tuning_db.tsv
-python3 tuningRunner.py --op gemm --config "-g 3 -m 1024 -k 769 -n 512 -t f32"
-python3 tuningRunner.py --op conv -c configs/tier1-conv-configs --tuning-space quick
-python3 tuningRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e
-python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs --tflops --abort-on-error
-ROCR_VISIBLE_DEVICES=2 python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs -o gpu2.tsv
+python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs -o tuning_db.tsv
+python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  --config "-t f32 -out_datatype f32 -transA false -transB false -g 3 -m 1024 -k 769 -n 512"
+python3 ../mlir/utils/performance/tuningRunner.py --op conv \
+  -c ../mlir/utils/performance/configs/tier1-conv-configs --tuning-space quick
+python3 ../mlir/utils/performance/tuningRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e
+python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs --tflops --abort-on-error
+ROCR_VISIBLE_DEVICES=2 python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs -o gpu2.tsv
 ```

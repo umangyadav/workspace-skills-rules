@@ -61,8 +61,8 @@ rocmlir-opt --my-pass input.mlir
 # Enable debug output (requires -DLLVM_ENABLE_ASSERTIONS=ON)
 rocmlir-opt --my-pass input.mlir --debug-only=my-pass
 
-# Dump full pipeline (rocMLIR side)
-rocmlir-driver -dump-pipelines -kernel-pipeline=full input.mlir 2>&1
+# Dump full pipeline (rocMLIR side); --arch is required even for a dump
+rocmlir-driver --arch=gfx942 -dump-pipelines -kernel-pipeline=full input.mlir 2>&1
 
 # Dump GCN assembly emitted via Triton
 rocmlir-driver --debug-only=serialize-to-blob -c input.mlir

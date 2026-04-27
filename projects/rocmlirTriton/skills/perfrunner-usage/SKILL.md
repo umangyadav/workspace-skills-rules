@@ -32,11 +32,11 @@ ROCR_VISIBLE_DEVICES=0 python3 perfRunner.py --op gemm --batch_all -c <configs> 
 
 ## Key flags
 
-- `-c` / `--configs_file` -- config file (default: `tier1-conv-configs`)
+- `-c` / `--configs_file` -- config file. The script's hard-coded default for conv (`mlir/utils/jenkins/performance/configs/tier1-conv-configs`) is **stale**; the actual configs live under `mlir/utils/performance/configs/`. Pass `-c` explicitly.
 - `-o` -- output file name (default: `{chip}_perf.{date}`)
 - `-t` / `--tuning_db` -- tuning DB TSV for "tuned" column
 - `-qt` / `--quick_tuning_db` -- quick tuning DB
-- `--test_dir` -- test directory for fusion mode (default: `../mlir/test/fusion/resnet50-e2e`)
+- `--test_dir` -- fusion-mode test directory. Default `../mlir/test/fusion/resnet50-e2e` only resolves when run from `build/`; from any other CWD pass an absolute or repo-rooted path (`mlir/test/fusion/resnet50-e2e`).
 - `--mlir-build-dir` -- build dir (auto-detected)
 - `--external-gemm-library` -- `hipBLASLt` (default) or `CK`
 - `--data-type` -- force types: `f32`, `f16`, `i8`, `i8_i32`, `i8_i8`, `fp8`, `fp8_fp8`, `fp8_f32`
@@ -58,14 +58,19 @@ python3 perfRunner.py --op gemm --batch_all -c <configs> -t mlir_tuning.tsv
 
 ## Examples
 
-```bash
-python3 perfRunner.py --batch_all -t mlir_tuning.tsv                    # conv vs MIOpen
-python3 perfRunner.py --op gemm --batch_all -t mlir_tuning.tsv          # GEMM vs hipBLASLt
-python3 perfRunner.py --op gemm --external-gemm-library CK -t mlir_tuning.tsv
-python3 perfRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e -t tuning_fusion.tsv
+Run from the `build/` directory so default paths (`--test_dir`, `find_mlir_build_dir()`) resolve:
 
-# Single config (no tuning DB needed)
-python3 perfRunner.py --op gemm -- -t f32 -transA true -transB true -g 1 -m 1024 -k 769 -n 512
+```bash
+python3 ../mlir/utils/performance/perfRunner.py --batch_all -t mlir_tuning.tsv               # conv vs MIOpen
+python3 ../mlir/utils/performance/perfRunner.py --op gemm --batch_all -t mlir_tuning.tsv     # GEMM vs hipBLASLt
+python3 ../mlir/utils/performance/perfRunner.py --op gemm --external-gemm-library CK -t mlir_tuning.tsv
+python3 ../mlir/utils/performance/perfRunner.py --op fusion \
+  --test_dir ../mlir/test/fusion/resnet50-e2e -t tuning_fusion.tsv
+
+# Single inline GEMM config: must include -t, -out_datatype, -transA, -transB, -g, -m, -k, -n
+# (otherwise GemmConfig.from_command_line() raises 'Incomplete GEMM configuration').
+python3 ../mlir/utils/performance/perfRunner.py --op gemm -- \
+  -t f32 -out_datatype f32 -transA true -transB true -g 1 -m 1024 -k 769 -n 512
 ```
 
 ## External baselines

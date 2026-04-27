@@ -18,9 +18,9 @@ ROCR_VISIBLE_DEVICES=0 python3 tuningRunner.py --op gemm -c <configs>
 
 ## Config source
 
-- `-c` / `--configs_file` -- file of configurations (default: `mlir/utils/jenkins/performance/configs/tier1-conv-configs`)
-- `--config <STR ...>` -- one or more inline config strings to test instead of a file (`nargs='*'`)
-- `--test_dir` -- fusion E2E tests directory (default: `../mlir/test/fusion/resnet50-e2e`); used when `--op fusion`
+- `-c` / `--configs_file` -- file of configurations. The script's hard-coded default points at `mlir/utils/jenkins/performance/configs/tier1-conv-configs`, which **does not exist** -- the actual configs live under `mlir/utils/performance/configs/`. Always pass `-c` explicitly, e.g. `-c mlir/utils/performance/configs/tier1-gemm-configs`.
+- `--config <STR ...>` -- one or more inline config strings to test instead of a file (`nargs='*'`). For GEMM, the string **must** include all of `-t`, `-out_datatype`, `-transA`, `-transB`, `-g`, `-m`, `-k`, `-n` -- otherwise `perfRunner.GemmConfig.from_command_line()` raises `ValueError: Incomplete GEMM configuration`.
+- `--test_dir` -- fusion E2E tests directory. Default `../mlir/test/fusion/resnet50-e2e` only resolves when run from the `build/` directory. From any other CWD, pass an absolute or repo-rooted path (the actual source is `mlir/test/fusion/resnet50-e2e`). Used only when `--op fusion`.
 
 ## Operation
 
@@ -58,11 +58,18 @@ Header columns (printed once at the top of `--output`):
 
 ## Examples
 
+Run from the rocmlirTriton `build/` directory so the script's default `--test_dir`/`find_mlir_build_dir()` resolve correctly:
+
 ```bash
-python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs -o tuning_db.tsv
-python3 tuningRunner.py --op gemm --config "-g 3 -m 1024 -k 769 -n 512 -t f32"
-python3 tuningRunner.py --op conv -c configs/tier1-conv-configs --tuning-space quick
-python3 tuningRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e
-python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs --tflops --abort-on-error
-ROCR_VISIBLE_DEVICES=2 python3 tuningRunner.py --op gemm -c configs/tier1-gemm-configs -o gpu2.tsv
+python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs -o tuning_db.tsv
+python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  --config "-t f32 -out_datatype f32 -transA false -transB false -g 3 -m 1024 -k 769 -n 512"
+python3 ../mlir/utils/performance/tuningRunner.py --op conv \
+  -c ../mlir/utils/performance/configs/tier1-conv-configs --tuning-space quick
+python3 ../mlir/utils/performance/tuningRunner.py --op fusion --test_dir ../mlir/test/fusion/resnet50-e2e
+python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs --tflops --abort-on-error
+ROCR_VISIBLE_DEVICES=2 python3 ../mlir/utils/performance/tuningRunner.py --op gemm \
+  -c ../mlir/utils/performance/configs/tier1-gemm-configs -o gpu2.tsv
 ```

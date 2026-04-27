@@ -68,17 +68,18 @@ All under `mlir/utils/performance/`. The two main entry points (`tuningRunner.py
 ## Common pipelines
 
 ```bash
-# Smoke
-rocmlir-gen --arch gfx942 -p | rocmlir-opt
+# Smoke (default op is conv -- supply problem dims; here a small GEMM)
+rocmlir-gen --arch gfx942 --operation gemm -t f16 -g 1 -m 64 -k 64 -n 64 -p | rocmlir-opt
 
-# Full lowering + validate (single op), Triton mlir-runner
-rocmlir-gen --arch gfx942 -ph -pv | rocmlir-driver -c | \
+# Full lowering + validate (single op), Triton mlir-runner.
+# rocmlir-gen defaults to conv and needs explicit problem dims; substitute -operation conv -fil_layout/... for conv.
+rocmlir-gen --arch gfx942 --operation gemm -t f16 -g 1 -m 64 -k 64 -n 64 -ph -pv | rocmlir-driver -c | \
   external/triton/llvm-project/build/bin/mlir-runner \
     --shared-libs=external/triton/llvm-project/build/lib/libmlir_rocm_runtime.so,build/lib/libconv-validation-wrappers.so,external/triton/llvm-project/build/lib/libmlir_runner_utils.so,external/triton/llvm-project/build/lib/libmlir_c_runner_utils.so \
     --entry-point-result=void
 
 # Tuning a single config
-rocmlir-gen --arch gfx942 --perf_config= | rocmlir-tuning-driver --tuning-space=quick
+rocmlir-gen --arch gfx942 --operation gemm -t f16 -g 1 -m 64 -k 64 -n 64 --perf_config= | rocmlir-tuning-driver --tuning-space=quick
 
 # Fusion E2E from .mlir input
 sed -e "s/gfx1100/$ARCH/g" -e "s/rock.num_cu = 96/rock.num_cu = $NUM_CU/g" fusion_with_host.mlir | \
